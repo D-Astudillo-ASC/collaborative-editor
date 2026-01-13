@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+server/node_modules/
+.pnpm-store/
+
+public/
+
+# Build outputs
+dist/
+server/dist/
+.vite/
+server/.vite/
+
+# Environment files / secrets
+.env
+.env.*
+server/.env
+server/.env.*
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+server/*.log
+
+# OS / editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Cursor / local tooling state
+.cursor/
+
+# Misc
+coverage/
+*.tsbuildinfo
