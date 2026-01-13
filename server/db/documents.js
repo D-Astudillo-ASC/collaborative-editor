@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const { getPool } = require('./pool');
+import crypto from 'crypto';
+import { getPool } from './pool.js';
 
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -147,7 +147,7 @@ async function rotateShareLink({ userId, documentId, mode }) {
   return { token, shareStatus };
 }
 
-module.exports = {
+export {
   listDocumentsForUser,
   createDocumentForUser,
   getMemberRole,

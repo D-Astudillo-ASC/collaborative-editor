@@ -9,11 +9,17 @@
 // const path = require('path');
 // const { getPool } = require('./pool');
 
-require('dotenv').config();
+import dotenv from 'dotenv';
+dotenv.config();
 
-const fs = require('fs');
-const path = require('path');
-const { getPool } = require('./pool');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { getPool } from './pool.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function ensureMigrationsTable(client) {
   await client.query(`
@@ -74,5 +80,5 @@ async function migrate() {
   }
 }
 
-module.exports = { migrate };
+export { migrate };
 

@@ -6,5 +6,5 @@ function getBearerToken(req) {
   return null;
 }
 
-module.exports = { getBearerToken };
+export { getBearerToken };
 

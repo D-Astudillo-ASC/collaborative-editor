@@ -1,5 +1,5 @@
-const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { getS3Client, isR2Configured } = require('./client');
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getS3Client, isR2Configured } from './client.js';
 
 function snapshotKey(documentId, seq) {
   return `docs/${documentId}/snapshots/${seq}.bin`;
@@ -44,5 +44,5 @@ async function downloadSnapshotBytes({ key }) {
   return buf;
 }
 
-module.exports = { snapshotKey, uploadSnapshot, downloadSnapshotBytes };
+export { snapshotKey, uploadSnapshot, downloadSnapshotBytes };
 

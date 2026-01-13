@@ -1,6 +1,6 @@
-const { getBearerToken } = require('../utils/http');
-const { verifyClerkJwt, claimsToProfile } = require('./clerk');
-const { upsertUserByClerkId } = require('../db/users');
+import { getBearerToken } from '../utils/http.js';
+import { verifyClerkJwt, claimsToProfile } from './clerk.js';
+import { upsertUserByClerkId } from '../db/users.js';
 
 async function requireClerkAuth(req, res, next) {
   try {
@@ -73,5 +73,5 @@ function socketClerkAuth() {
   };
 }
 
-module.exports = { requireClerkAuth, socketClerkAuth };
+export { requireClerkAuth, socketClerkAuth };
 

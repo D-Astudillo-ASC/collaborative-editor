@@ -1,4 +1,4 @@
-const { getPool } = require('./pool');
+import { getPool } from './pool.js';
 
 async function upsertUserByClerkId({ clerkUserId, email, name, avatarUrl }) {
   if (!clerkUserId) {
@@ -23,5 +23,5 @@ async function upsertUserByClerkId({ clerkUserId, email, name, avatarUrl }) {
   return res.rows[0];
 }
 
-module.exports = { upsertUserByClerkId };
+export { upsertUserByClerkId };
 

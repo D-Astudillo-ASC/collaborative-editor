@@ -1,8 +1,9 @@
-const { Pool } = require('pg');
+import pg from 'pg';
+const { Pool } = pg;
 
 let pool;
 
-function getPool() {
+export function getPool() {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
@@ -17,6 +18,4 @@ function getPool() {
   }
   return pool;
 }
-
-module.exports = { getPool };
 

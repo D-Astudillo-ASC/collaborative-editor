@@ -1,4 +1,4 @@
-const { getPool } = require('./pool');
+import { getPool } from './pool.js';
 
 async function getDocumentState(documentId) {
   const pool = getPool();
@@ -100,5 +100,5 @@ async function markSnapshot({ documentId, snapshotSeq, r2Key, pruneUpdatesBefore
   }
 }
 
-module.exports = { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot };
+export { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot };
 

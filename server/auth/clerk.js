@@ -1,37 +1,39 @@
 // PREVIOUS IMPLEMENTATION (commented out):
-// - Imported `jose` via `require()` in a CommonJS module.
+// - Server was CommonJS (`require`/`module.exports`), but `jose@6` is ESM-only.
+// - Attempted workarounds: dynamic `import()` + crypto polyfill, which caused "crypto is not defined" errors.
 //
 // Reason for change:
-// - `jose@6` is ESM-only. When deployed (Fly/Docker), Node throws:
-//   "Error [ERR_REQUIRE_ESM]: require() of ES Module .../jose/... not supported."
-// - We keep the server as CommonJS and load `jose` via dynamic `import()` (supported in CJS).
+// - Convert entire server to ESM (`"type": "module"` in package.json) so `jose` works natively.
+// - However, `jose` v6 requires `globalThis.crypto` (Web Crypto API), which Node.js 18 exposes via `crypto.webcrypto`.
+//   In some Docker/Alpine environments, `globalThis.crypto` isn't set automatically, so we polyfill it before importing `jose`.
 //
 // const { createRemoteJWKSet, jwtVerify } = require('jose');
+// ... crypto polyfill hacks ...
 
-let joseModulePromise;
+import crypto from 'crypto';
 
-async function getJose() {
-  if (!joseModulePromise) {
-    joseModulePromise = import('jose');
-  }
-  return joseModulePromise;
+// Ensure Web Crypto API is available globally for jose (Node.js 18+)
+// In Node.js 18+, crypto.webcrypto exists but globalThis.crypto might not be set in all environments.
+if (!globalThis.crypto) {
+  globalThis.crypto = crypto.webcrypto;
 }
+
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 let jwks;
 
-async function getJwks() {
+function getJwks() {
   if (!jwks) {
     const jwksUrl = process.env.CLERK_JWKS_URL;
     if (!jwksUrl) {
       throw new Error('Missing CLERK_JWKS_URL');
     }
-    const { createRemoteJWKSet } = await getJose();
     jwks = createRemoteJWKSet(new URL(jwksUrl));
   }
   return jwks;
 }
 
-async function verifyClerkJwt(token) {
+export async function verifyClerkJwt(token) {
   const issuer = process.env.CLERK_ISSUER;
   const audience = process.env.CLERK_AUDIENCE;
 
@@ -39,12 +41,11 @@ async function verifyClerkJwt(token) {
   if (issuer) options.issuer = issuer;
   if (audience) options.audience = audience;
 
-  const { jwtVerify } = await getJose();
-  const { payload } = await jwtVerify(token, await getJwks(), options);
+  const { payload } = await jwtVerify(token, getJwks(), options);
   return payload;
 }
 
-function claimsToProfile(payload) {
+export function claimsToProfile(payload) {
   const clerkUserId = payload.sub;
   const email =
     payload.email ||
@@ -66,6 +67,4 @@ function claimsToProfile(payload) {
     avatarUrl,
   };
 }
-
-module.exports = { verifyClerkJwt, claimsToProfile };
 

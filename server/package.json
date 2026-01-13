@@ -5,14 +5,14 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
-    "migrate": "node -e \"require('./db/migrate').migrate().then(()=>process.exit(0)).catch((e)=>{console.error(e);process.exit(1);})\"",
+    "migrate": "node -e \"import('./db/migrate.js').then(m=>m.migrate().then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1);}))\"",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.966.0",
     "@clerk/clerk-react": "^5.59.3",

@@ -1,4 +1,4 @@
-const { getPool } = require('./pool');
+import { getPool } from './pool.js';
 
 async function listFoldersForUser(userId) {
   const pool = getPool();
@@ -27,5 +27,5 @@ async function createFolderForUser({ userId, name, parentFolderId }) {
   return res.rows[0];
 }
 
-module.exports = { listFoldersForUser, createFolderForUser };
+export { listFoldersForUser, createFolderForUser };
 

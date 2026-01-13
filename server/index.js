@@ -1,10 +1,11 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const Y = require('yjs');
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import * as Y from 'yjs';
+import dotenv from 'dotenv';
 
-require('dotenv').config();
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -18,12 +19,12 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-const { migrate } = require('./db/migrate');
-const { requireClerkAuth, socketClerkAuth } = require('./auth/middleware');
-const { listDocumentsForUser, createDocumentForUser, validateLinkToken, rotateShareLink, getMemberRole } = require('./db/documents');
-const { listFoldersForUser, createFolderForUser } = require('./db/folders');
-const { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } = require('./db/updates');
-const { downloadSnapshotBytes, uploadSnapshot } = require('./r2/snapshots');
+import { migrate } from './db/migrate.js';
+import { requireClerkAuth, socketClerkAuth } from './auth/middleware.js';
+import { listDocumentsForUser, createDocumentForUser, validateLinkToken, rotateShareLink, getMemberRole } from './db/documents.js';
+import { listFoldersForUser, createFolderForUser } from './db/folders.js';
+import { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } from './db/updates.js';
+import { downloadSnapshotBytes, uploadSnapshot } from './r2/snapshots.js';
 
 /*
 PREVIOUS IMPLEMENTATION (commented out):

@@ -1,4 +1,4 @@
-const { S3Client } = require('@aws-sdk/client-s3');
+import { S3Client } from '@aws-sdk/client-s3';
 
 let client;
 
@@ -51,5 +51,5 @@ function getS3Client() {
   return client;
 }
 
-module.exports = { getS3Client, isR2Configured };
+export { getS3Client, isR2Configured };
 
