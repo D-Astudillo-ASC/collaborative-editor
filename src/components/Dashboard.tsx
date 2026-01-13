@@ -24,6 +24,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import { useAuth } from '../contexts/AuthContext';
 import { CODE_TEMPLATES, type CodeTemplateKey } from '../templates/codeTemplates';
+import { apiUrl } from '../config/backend';
 
 interface Document {
   id: string;
@@ -63,16 +64,16 @@ const Dashboard: React.FC = () => {
       setError(null);
       const token = await getAccessToken();
       if (!token) return;
-      const response = await fetch('/api/documents', {
+      const response = await fetch(apiUrl('/api/documents'), {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const data = await response.json();
       setDocuments(data.documents || []);
     } catch (error) {
@@ -85,13 +86,13 @@ const Dashboard: React.FC = () => {
 
   const handleCreateDocument = async () => {
     if (!newDocTitle.trim()) return;
-    
+
 
     try {
       const token = await getAccessToken();
       if (!token) return;
       const template = CODE_TEMPLATES[selectedTemplate];
-      const response = await fetch('/api/documents', {
+      const response = await fetch(apiUrl('/api/documents'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -116,13 +117,13 @@ const Dashboard: React.FC = () => {
       }
 
       const newDoc = await response.json();
-      
+
       // Add the new document to the local state
       setDocuments([...documents, newDoc]);
       setOpenNewDoc(false);
       setNewDocTitle('');
       setSelectedTemplate('blank');
-      
+
       // Navigate to the new document
       navigate(`/document/${newDoc.id}`);
     } catch (error) {
@@ -217,12 +218,12 @@ const Dashboard: React.FC = () => {
             label="Document Title"
             fullWidth
             value={newDocTitle}
-            onChange={(e) => {setNewDocTitle(e.target.value);}}
-            // onKeyDown={(e) => {
-            //   if (e.key === 'Enter') {
-            //     handleCreateDocument();
-            //   }
-            // }}
+            onChange={(e) => { setNewDocTitle(e.target.value); }}
+          // onKeyDown={(e) => {
+          //   if (e.key === 'Enter') {
+          //     handleCreateDocument();
+          //   }
+          // }}
           />
 
           <FormControl fullWidth margin="dense">
@@ -247,8 +248,8 @@ const Dashboard: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenNewDoc(false)}>Cancel</Button>
-          <Button 
-            onClick={handleCreateDocument} 
+          <Button
+            onClick={handleCreateDocument}
             variant="contained"
             disabled={!newDocTitle.trim()}
           >

@@ -1,7 +1,15 @@
 import { io, type Socket } from 'socket.io-client';
+import { SOCKET_BASE_URL } from '../config/backend';
 
-// Connect directly to the backend server for WebSocket
-const SOCKET_URL = 'http://localhost:5000';
+// PREVIOUS IMPLEMENTATION (commented out):
+// - Hard-coded localhost backend URL.
+//
+// Reason for change:
+// - In production (Vercel + Fly), the browser must connect to the Fly app domain.
+//   We configure this via VITE_BACKEND_URL / VITE_SOCKET_URL.
+//
+// const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = SOCKET_BASE_URL || 'http://localhost:5000';
 
 // PREVIOUS IMPLEMENTATION (commented out):
 // - A singleton socket connected immediately on import and had no auth payload.

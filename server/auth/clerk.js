@@ -1,13 +1,31 @@
-const { createRemoteJWKSet, jwtVerify } = require('jose');
+// PREVIOUS IMPLEMENTATION (commented out):
+// - Imported `jose` via `require()` in a CommonJS module.
+//
+// Reason for change:
+// - `jose@6` is ESM-only. When deployed (Fly/Docker), Node throws:
+//   "Error [ERR_REQUIRE_ESM]: require() of ES Module .../jose/... not supported."
+// - We keep the server as CommonJS and load `jose` via dynamic `import()` (supported in CJS).
+//
+// const { createRemoteJWKSet, jwtVerify } = require('jose');
+
+let joseModulePromise;
+
+async function getJose() {
+  if (!joseModulePromise) {
+    joseModulePromise = import('jose');
+  }
+  return joseModulePromise;
+}
 
 let jwks;
 
-function getJwks() {
+async function getJwks() {
   if (!jwks) {
     const jwksUrl = process.env.CLERK_JWKS_URL;
     if (!jwksUrl) {
       throw new Error('Missing CLERK_JWKS_URL');
     }
+    const { createRemoteJWKSet } = await getJose();
     jwks = createRemoteJWKSet(new URL(jwksUrl));
   }
   return jwks;
@@ -21,7 +39,8 @@ async function verifyClerkJwt(token) {
   if (issuer) options.issuer = issuer;
   if (audience) options.audience = audience;
 
-  const { payload } = await jwtVerify(token, getJwks(), options);
+  const { jwtVerify } = await getJose();
+  const { payload } = await jwtVerify(token, await getJwks(), options);
   return payload;
 }
 

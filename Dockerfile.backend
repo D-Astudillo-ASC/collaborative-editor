@@ -1,0 +1,24 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# PREVIOUS IMPLEMENTATION (commented out):
+# - Used `npm install` and `package*.json`, which is not reproducible now that we standardized on pnpm.
+#
+# Reason for change:
+# - Fly builds should match local/CI dependency resolution. We install via pnpm using the lockfile.
+#
+# COPY server/package*.json ./
+# RUN npm install
+
+# Enable pnpm via Corepack (bundled with Node 18)
+RUN corepack enable
+
+COPY server/package.json server/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+
+COPY server .
+
+EXPOSE 5000
+
+CMD ["node", "index.js"]

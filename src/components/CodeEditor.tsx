@@ -20,6 +20,7 @@ import { MonacoBinding } from 'y-monaco';
 import { Awareness } from 'y-protocols/awareness';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import Chat from './Chat';
+import { apiUrl } from '../config/backend';
 
 // Language definitions with syntax highlighting
 const SUPPORTED_LANGUAGES = {
@@ -1672,7 +1673,7 @@ const CodeEditor: React.FC = () => {
     }
 
     try {
-      const res = await fetch(`/api/documents/${id}/share-link`, {
+      const res = await fetch(apiUrl(`/api/documents/${id}/share-link`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
