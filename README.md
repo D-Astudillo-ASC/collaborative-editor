@@ -71,6 +71,10 @@ Create `.env.local` in the repo root:
 
 ```env
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+
+# Production (Vercel): set these to point to your Fly backend
+# VITE_BACKEND_URL=https://your-app.fly.dev
+# VITE_SOCKET_URL=https://your-app.fly.dev
 ```
 
 #### Backend
@@ -90,11 +94,12 @@ CLERK_ISSUER=https://...   # your Clerk issuer
 CLERK_JWKS_URL=https://... # your Clerk JWKS endpoint
 
 # Optional: Backblaze B2 (S3-compatible) snapshots
-B2_S3_ENDPOINT=https://...
-B2_S3_REGION=...           # if applicable for your endpoint
-B2_S3_ACCESS_KEY_ID=...
-B2_S3_SECRET_ACCESS_KEY=...
-B2_S3_BUCKET=...
+# Note: server code uses R2_* prefix (works for both R2 and B2)
+R2_ENDPOINT=https://s3.<region>.backblazeb2.com
+R2_REGION=<region>         # optional; code can infer from endpoint
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=...
 ```
 
 ### Migrate DB (one-time)
@@ -118,6 +123,62 @@ pnpm dev
 ```
 
 Open `http://localhost:3000`.
+
+---
+
+## Deployment (production)
+
+### Backend on Fly.io
+
+1. **Install Fly CLI** and login:
+   ```bash
+   brew install flyctl
+   fly auth login
+   ```
+
+2. **Launch app** (from repo root):
+   ```bash
+   fly launch --name your-app-name --dockerfile Dockerfile.backend --no-deploy
+   ```
+
+3. **Set secrets** (replace values):
+   ```bash
+   fly secrets set -a your-app-name \
+     NODE_ENV="production" \
+     FRONTEND_URL="https://your-vercel-domain" \
+     DATABASE_URL="postgres://..." \
+     CLERK_JWKS_URL="https://..." \
+     CLERK_ISSUER="https://..." \
+     R2_ENDPOINT="https://..." \
+     R2_BUCKET="..." \
+     R2_ACCESS_KEY_ID="..." \
+     R2_SECRET_ACCESS_KEY="..."
+   ```
+
+4. **Deploy**:
+   ```bash
+   fly deploy -a your-app-name
+   ```
+
+### Frontend on Vercel
+
+1. **Push to GitHub** (Vercel deploys from GitHub).
+
+2. **Create Vercel project**: Vercel Dashboard → New Project → import repo.
+
+3. **Configure build**:
+   - Framework: **Vite**
+   - Build: `pnpm run build`
+   - Output: `dist`
+
+4. **Set environment variables**:
+   - `VITE_CLERK_PUBLISHABLE_KEY=pk_...`
+   - `VITE_BACKEND_URL=https://your-app.fly.dev`
+   - (optional) `VITE_SOCKET_URL=https://your-app.fly.dev`
+
+5. **Deploy** (automatic on push, or trigger manually).
+
+**Note**: `vercel.json` is included to handle client-side routing (SPA rewrites).
 
 ---
 
