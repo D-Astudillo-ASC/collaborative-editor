@@ -1,0 +1,94 @@
+/* PREVIOUS IMPLEMENTATION (commented out):
+   - No styles for y-monaco awareness cursors existed, so remote selections/caret could be invisible.
+
+   Reason for change:
+   - y-monaco renders remote selections with these class names; styling them gives Google-Docs-like cursors. */
+
+.yRemoteSelection {
+  background-color: rgba(66, 133, 244, 0.25);
+  /* Google-ish blue highlight */
+}
+
+.yRemoteSelectionHead {
+  /* Monaco uses `beforeContentClassName` which injects a real inline element.
+     These styles make the caret reliably visible for collapsed selections. */
+  display: inline-block;
+  position: relative;
+  border-left: 2px solid rgba(66, 133, 244, 0.9);
+  height: 1.2em;
+  vertical-align: text-bottom;
+  margin-left: -1px;
+  pointer-events: none;
+  animation: yjs-caret-blink 1.1s steps(2, start) infinite;
+}
+
+/* Multi-user color palette (deterministic by clientID mod N) */
+.yRemoteSelection--c0 {
+  background-color: rgba(66, 133, 244, 0.22);
+}
+
+.yRemoteSelectionHead--c0 {
+  border-left-color: rgba(66, 133, 244, 0.95);
+}
+
+.yRemoteSelection--c1 {
+  background-color: rgba(219, 68, 55, 0.20);
+}
+
+.yRemoteSelectionHead--c1 {
+  border-left-color: rgba(219, 68, 55, 0.95);
+}
+
+.yRemoteSelection--c2 {
+  background-color: rgba(15, 157, 88, 0.20);
+}
+
+.yRemoteSelectionHead--c2 {
+  border-left-color: rgba(15, 157, 88, 0.95);
+}
+
+.yRemoteSelection--c3 {
+  background-color: rgba(244, 180, 0, 0.20);
+}
+
+.yRemoteSelectionHead--c3 {
+  border-left-color: rgba(244, 180, 0, 0.95);
+}
+
+.yRemoteSelection--c4 {
+  background-color: rgba(171, 71, 188, 0.20);
+}
+
+.yRemoteSelectionHead--c4 {
+  border-left-color: rgba(171, 71, 188, 0.95);
+}
+
+.yRemoteSelection--c5 {
+  background-color: rgba(0, 172, 193, 0.20);
+}
+
+.yRemoteSelectionHead--c5 {
+  border-left-color: rgba(0, 172, 193, 0.95);
+}
+
+.yRemoteSelection--c6 {
+  background-color: rgba(255, 112, 67, 0.20);
+}
+
+.yRemoteSelectionHead--c6 {
+  border-left-color: rgba(255, 112, 67, 0.95);
+}
+
+.yRemoteSelection--c7 {
+  background-color: rgba(124, 179, 66, 0.20);
+}
+
+.yRemoteSelectionHead--c7 {
+  border-left-color: rgba(124, 179, 66, 0.95);
+}
+
+@keyframes yjs-caret-blink {
+  to {
+    border-left-color: transparent;
+  }
+}
