@@ -393,6 +393,9 @@ class ExecutionQueue {
 
     this.worker.on('error', (err) => {
       console.error(`[ExecutionQueue] ⚠️ Worker error:`, err.message);
+      console.error(`[ExecutionQueue] Worker error stack:`, err.stack);
+      // CRITICAL: Don't throw - worker errors should not crash the server
+      // The error is logged, but the worker continues processing other jobs
     });
 
     this.worker.on('stalled', (jobId) => {

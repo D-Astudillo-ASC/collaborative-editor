@@ -67,24 +67,106 @@ export async function isDockerAvailable() {
  */
 export async function checkDockerImage(imageName) {
   return new Promise((resolve) => {
-    const checkProcess = spawn('docker', ['images', '-q', imageName], {
+    // CRITICAL: Ensure DOCKER_HOST is passed to spawn (for remote Docker daemon)
+    // Docker CLI automatically uses DOCKER_HOST from environment
+    const dockerHost = process.env.DOCKER_HOST;
+    if (dockerHost) {
+      console.log(`[Docker] Checking image ${imageName} on remote Docker daemon: ${dockerHost}`);
+    }
+    
+    // Try docker images with filter first (more reliable for remote daemons)
+    // Format: REPOSITORY:TAG (e.g., registry.fly.io/app:tag)
+    const [repo, tag] = imageName.includes(':') 
+      ? imageName.split(':')
+      : [imageName, 'latest'];
+    
+    const checkProcess = spawn('docker', ['images', '--format', '{{.Repository}}:{{.Tag}}', '--filter', `reference=${imageName}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env, // Inherit all env vars including DOCKER_HOST
+      },
     });
 
     // Add timeout to prevent hanging (5 seconds)
     const timeout = setTimeout(() => {
       checkProcess.kill('SIGKILL');
+      console.log(`[Docker] Image check timeout for ${imageName}`);
       resolve(false);
     }, 5000);
 
     let output = '';
+    let errorOutput = '';
+    
     checkProcess.stdout.on('data', (data) => {
       output += data.toString();
+    });
+    
+    checkProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
     });
 
     checkProcess.on('close', (code) => {
       clearTimeout(timeout);
-      resolve(code === 0 && output.trim().length > 0);
+      
+      if (errorOutput) {
+        console.log(`[Docker] Stderr for ${imageName}: ${errorOutput.trim()}`);
+      }
+      
+      // Check if the image name appears in the output
+      const exists = code === 0 && output.trim().length > 0 && output.includes(imageName);
+      
+      if (!exists) {
+        console.log(`[Docker] Image ${imageName} not found (exit code ${code})`);
+        if (output.trim()) {
+          console.log(`[Docker] Available images: ${output.trim()}`);
+        }
+        // Fallback: try docker image inspect as backup
+        console.log(`[Docker] Trying fallback: docker image inspect ${imageName}`);
+        return checkDockerImageFallback(imageName).then(resolve);
+      } else {
+        console.log(`[Docker] ✅ Image ${imageName} found`);
+        resolve(true);
+      }
+    });
+
+    checkProcess.on('error', (error) => {
+      clearTimeout(timeout);
+      console.error(`[Docker] Error checking image ${imageName}:`, error.message);
+      // Fallback to inspect
+      return checkDockerImageFallback(imageName).then(resolve);
+    });
+  });
+}
+
+// Fallback method using docker image inspect
+async function checkDockerImageFallback(imageName) {
+  return new Promise((resolve) => {
+    const checkProcess = spawn('docker', ['image', 'inspect', imageName], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+      },
+    });
+
+    const timeout = setTimeout(() => {
+      checkProcess.kill('SIGKILL');
+      resolve(false);
+    }, 5000);
+
+    let errorOutput = '';
+    checkProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    checkProcess.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        console.log(`[Docker] ✅ Image ${imageName} found (via inspect fallback)`);
+        resolve(true);
+      } else {
+        console.log(`[Docker] Image ${imageName} not found via inspect: ${errorOutput.trim()}`);
+        resolve(false);
+      }
     });
 
     checkProcess.on('error', () => {
@@ -207,6 +289,7 @@ export async function executePythonDocker(code, filePath, timeout, maxOutputSize
 
     dockerProcess.on('error', (error) => {
       clearTimeout(timeoutId);
+      clearTimeout(spawnTimeout);
       reject(new Error(`Failed to start Docker container: ${error.message}`));
     });
   });

@@ -69,15 +69,54 @@ let dockerImagesReady = false;
   if (USE_DOCKER) {
     dockerAvailable = await isDockerAvailable();
     if (dockerAvailable) {
+      // Debug: Log DOCKER_HOST to verify it's set
+      const dockerHost = process.env.DOCKER_HOST;
+      if (dockerHost) {
+        console.log(`[Executor] DOCKER_HOST is set: ${dockerHost}`);
+      } else {
+        console.warn('[Executor] ⚠️ DOCKER_HOST not set - Docker CLI will use local socket (may not work)');
+      }
+      
       // CRITICAL FIX: Use environment variables for image names (not hardcoded 'latest')
       // This ensures we check for the correct images that will actually be used
       const pythonImageName = process.env.PYTHON_EXECUTOR_IMAGE || 'python-executor:latest';
       const javaImageName = process.env.JAVA_EXECUTOR_IMAGE || 'java-executor:latest';
       
+      console.log(`[Executor] Checking for images: ${pythonImageName}, ${javaImageName}`);
+      
+      // First, test connectivity by listing all images
+      try {
+        const { spawn } = await import('child_process');
+        const listProcess = spawn('docker', ['images', '--format', '{{.Repository}}:{{.Tag}}'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env },
+        });
+        
+        let listOutput = '';
+        listProcess.stdout.on('data', (data) => {
+          listOutput += data.toString();
+        });
+        
+        await new Promise((resolve) => {
+          listProcess.on('close', resolve);
+        });
+        
+        if (listOutput.trim()) {
+          console.log(`[Executor] Available images on remote Docker: ${listOutput.trim().split('\n').join(', ')}`);
+        } else {
+          console.log(`[Executor] No images found on remote Docker daemon`);
+        }
+      } catch (err) {
+        console.error(`[Executor] Error listing images:`, err.message);
+      }
+      
       const [pythonImageExists, javaImageExists] = await Promise.all([
         checkDockerImage(pythonImageName),
         checkDockerImage(javaImageName),
       ]);
+      
+      console.log(`[Executor] Image check results: Python=${pythonImageExists}, Java=${javaImageExists}`);
+      
       dockerImagesReady = pythonImageExists && javaImageExists;
       
       if (!dockerImagesReady) {

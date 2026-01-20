@@ -173,7 +173,7 @@ io.on('connection', (socket) => {
   // });
   */
 
-  socket.on('join-document', async (payload) => {
+  socket.on('join-document', wrapHandler(async (payload) => {
     const documentId = typeof payload === 'string' ? payload : payload?.documentId;
     const linkToken = typeof payload === 'object' ? payload?.linkToken : null;
 
@@ -199,7 +199,7 @@ io.on('connection', (socket) => {
       role = await getMemberRole({ userId: user.id, documentId });
       if (!role) role = await validateLinkToken({ documentId, token: linkToken });
       if (!role) {
-        socket.emit('error', { message: 'forbidden' });
+        safeEmit('error', { message: 'forbidden' });
         return;
       }
 
@@ -242,7 +242,7 @@ io.on('connection', (socket) => {
 
       const updates = await fetchUpdatesAfter({ documentId, afterSeq: effectiveSnapshotSeq });
 
-      socket.emit('doc-init', {
+      safeEmit('doc-init', {
         documentId,
         snapshot,
         snapshotSeq: effectiveSnapshotSeq,
@@ -260,15 +260,15 @@ io.on('connection', (socket) => {
         userName: `User ${socket.id.slice(0, 6)}`,
         timestamp: Date.now(),
       });
-      socket.emit('active-users', activeUsers);
+      safeEmit('active-users', activeUsers);
     } catch (e) {
       console.error('join-document failed:', e);
-      socket.emit('error', { message: 'join_failed' });
+      safeEmit('error', { message: 'join_failed' });
     }
-  });
+  }));
 
   // Realtime cursor/selection presence (Yjs awareness protocol)
-  socket.on('awareness-update', (data) => {
+  socket.on('awareness-update', wrapHandler((data) => {
     const documentId = data?.documentId;
     const update = data?.update;
     if (!documentId || !update) return;
@@ -276,8 +276,12 @@ io.on('connection', (socket) => {
     if (!docInfo) return;
 
     // Relay to all other clients in the document room.
-    socket.to(documentId).emit('awareness-update', { documentId, update });
-  });
+    try {
+      socket.to(documentId).emit('awareness-update', { documentId, update });
+    } catch (error) {
+      console.error('[WebSocket] Error relaying awareness-update:', error.message);
+    }
+  }));
 
   /*
   PREVIOUS IMPLEMENTATION (commented out):
@@ -300,7 +304,7 @@ io.on('connection', (socket) => {
   // });
   */
 
-  socket.on('yjs-update', async (data) => {
+  socket.on('yjs-update', wrapHandler(async (data) => {
     const startTime = Date.now();
     const documentId = data?.documentId;
     const update = data?.update;
@@ -329,11 +333,16 @@ io.on('connection', (socket) => {
         console.warn('⚠️ Failed applying update to cache:', e?.message || e);
       }
 
-      socket.to(documentId).emit('yjs-update', {
-        documentId,
-        seq,
-        update,
-      });
+      try {
+        socket.to(documentId).emit('yjs-update', {
+          documentId,
+          seq,
+          update,
+        });
+      } catch (error) {
+        console.error('[WebSocket] Error emitting yjs-update:', error.message);
+        // Don't throw - keep connection alive
+      }
 
       // Snapshotting policy (best effort, only when bucket is configured)
       const cfg = snapshotConfig();
@@ -370,141 +379,180 @@ io.on('connection', (socket) => {
     } catch (e) {
       console.error('yjs-update failed:', e);
       if (global.updateStats) global.updateStats.errors++;
+      // Don't throw - keep WebSocket connection alive
+      // Error is logged but connection remains active
     }
-  });
+  }));
 
-  socket.on('send-message', (data) => {
+  socket.on('send-message', wrapHandler((data) => {
     const { documentId, message, userId } = data;
     console.log(`Client ${socket.id} sending message:`, message);
 
     // Broadcast message to other clients in the same document
-    socket.to(documentId).emit('message-received', {
-      documentId,
-      message,
-      userId: userId || socket.id,
-      userName: `User ${(userId || socket.id).slice(0, 6)}`,
-      timestamp: Date.now()
-    });
-  });
+    try {
+      socket.to(documentId).emit('message-received', {
+        documentId,
+        message,
+        userId: userId || socket.id,
+        userName: `User ${(userId || socket.id).slice(0, 6)}`,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting message-received:', error.message);
+    }
+  }));
 
   // Handle typing indicators
-  socket.on('typing-start', (data) => {
+  socket.on('typing-start', wrapHandler((data) => {
     const { documentId, userName } = data;
     console.log(`Client ${socket.id} started typing in ${documentId}`);
 
     // Broadcast typing start to other clients
-    socket.to(documentId).emit('typing-start', {
-      documentId,
-      userName,
-      userId: socket.id
-    });
-  });
+    try {
+      socket.to(documentId).emit('typing-start', {
+        documentId,
+        userName,
+        userId: socket.id
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting typing-start:', error.message);
+    }
+  }));
 
-  socket.on('typing-stop', (data) => {
+  socket.on('typing-stop', wrapHandler((data) => {
     const { documentId, userName } = data;
     console.log(`Client ${socket.id} stopped typing in ${documentId}`);
 
     // Broadcast typing stop to other clients
-    socket.to(documentId).emit('typing-stop', {
-      documentId,
-      userName,
-      userId: socket.id
-    });
-  });
+    try {
+      socket.to(documentId).emit('typing-stop', {
+        documentId,
+        userName,
+        userId: socket.id
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting typing-stop:', error.message);
+    }
+  }));
 
   // GOOGLE-LEVEL: Handle granular operations for advanced collaboration
-  socket.on('document-operation', (data) => {
+  socket.on('document-operation', wrapHandler((data) => {
     const { documentId, operation, userId } = data;
     console.log(`Client ${socket.id} operation:`, operation.type, 'at position:', operation.position);
 
     // Broadcast operation to other clients in the same document room
-    socket.to(documentId).emit('document-operation', {
-      documentId,
-      operation,
-      userId: userId || socket.id,
-      timestamp: Date.now()
-    });
-    console.log(`Broadcasted operation to other clients in document: ${documentId}`);
-  });
+    try {
+      socket.to(documentId).emit('document-operation', {
+        documentId,
+        operation,
+        userId: userId || socket.id,
+        timestamp: Date.now()
+      });
+      console.log(`Broadcasted operation to other clients in document: ${documentId}`);
+    } catch (error) {
+      console.error('[WebSocket] Error emitting document-operation:', error.message);
+    }
+  }));
 
-  socket.on('cursor-position', (data) => {
+  socket.on('cursor-position', wrapHandler((data) => {
     const { documentId, position, userId, userName, color } = data;
     console.log(`Client ${socket.id} cursor position:`, position, 'User:', userName);
 
     // Broadcast cursor position to other clients in the same document
-    socket.to(documentId).emit('cursor-updated', {
-      userId: userId || socket.id, // Use provided userId or fallback to socket.id
-      userName: userName || `User ${socket.id.slice(0, 6)}`,
-      position,
-      color: color || '#ff0000',
-      timestamp: Date.now()
-    });
-  });
+    try {
+      socket.to(documentId).emit('cursor-updated', {
+        userId: userId || socket.id, // Use provided userId or fallback to socket.id
+        userName: userName || `User ${socket.id.slice(0, 6)}`,
+        position,
+        color: color || '#ff0000',
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting cursor-updated:', error.message);
+    }
+  }));
 
-  socket.on('content-change', (data) => {
+  socket.on('content-change', wrapHandler((data) => {
     const { documentId, content, userId, userName, color } = data;
     console.log(`Client ${socket.id} content change from user:`, userName);
 
     // Broadcast content change to other clients in the same document
-    socket.to(documentId).emit('content-change', {
-      documentId,
-      content,
-      userId: userId || socket.id,
-      userName: userName || `User ${socket.id.slice(0, 6)}`,
-      color: color || '#ff0000',
-      timestamp: Date.now()
-    });
-  });
+    try {
+      socket.to(documentId).emit('content-change', {
+        documentId,
+        content,
+        userId: userId || socket.id,
+        userName: userName || `User ${socket.id.slice(0, 6)}`,
+        color: color || '#ff0000',
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting content-change:', error.message);
+    }
+  }));
 
-  socket.on('selection-change', (data) => {
+  socket.on('selection-change', wrapHandler((data) => {
     const { documentId, selection, userId, userName, color } = data;
     console.log(`Client ${socket.id} selection change:`, selection, 'User:', userName);
 
     // Broadcast selection change to other clients in the same document
-    socket.to(documentId).emit('selection-change', {
-      userId: userId || socket.id,
-      userName: userName || `User ${socket.id.slice(0, 6)}`,
-      selection,
-      color: color || '#ff0000',
-      timestamp: Date.now()
-    });
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected, socket ID:', socket.id);
-  });
-
-  socket.on('leave-document', (documentId) => {
-    socket.leave(documentId);
-    console.log(`Client ${socket.id} left document: ${documentId}`);
-
-    // Get room info after leaving
-    const room = io.sockets.adapter.rooms.get(documentId);
-    const clientCount = room ? room.size : 0;
-    console.log(`Room ${documentId} now has ${clientCount} clients`);
-
-    // Notify other users about user leaving
-    socket.to(documentId).emit('user-left', {
-      userId: socket.id,
-      userName: `User ${socket.id.slice(0, 6)}`,
-      timestamp: Date.now()
-    });
-  });
-
-  socket.on('get-active-users', (documentId) => {
-    const room = io.sockets.adapter.rooms.get(documentId);
-    if (room) {
-      const activeUsers = Array.from(room).map(socketId => ({
-        userId: socketId,
-        userName: `User ${socketId.slice(0, 6)}`
-      }));
-      console.log(`Sending active users for document ${documentId}:`, activeUsers);
-      socket.emit('active-users', activeUsers);
-    } else {
-      console.log(`No room found for document ${documentId}`);
-      socket.emit('active-users', []);
+    try {
+      socket.to(documentId).emit('selection-change', {
+        userId: userId || socket.id,
+        userName: userName || `User ${socket.id.slice(0, 6)}`,
+        selection,
+        color: color || '#ff0000',
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error emitting selection-change:', error.message);
     }
-  });
+  }));
+
+  socket.on('disconnect', wrapHandler(() => {
+    console.log('Client disconnected, socket ID:', socket.id);
+  }));
+
+  socket.on('leave-document', wrapHandler((documentId) => {
+    try {
+      socket.leave(documentId);
+      console.log(`Client ${socket.id} left document: ${documentId}`);
+
+      // Get room info after leaving
+      const room = io.sockets.adapter.rooms.get(documentId);
+      const clientCount = room ? room.size : 0;
+      console.log(`Room ${documentId} now has ${clientCount} clients`);
+
+      // Notify other users about user leaving
+      socket.to(documentId).emit('user-left', {
+        userId: socket.id,
+        userName: `User ${socket.id.slice(0, 6)}`,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('[WebSocket] Error in leave-document:', error.message);
+    }
+  }));
+
+  socket.on('get-active-users', wrapHandler((documentId) => {
+    try {
+      const room = io.sockets.adapter.rooms.get(documentId);
+      if (room) {
+        const activeUsers = Array.from(room).map(socketId => ({
+          userId: socketId,
+          userName: `User ${socketId.slice(0, 6)}`
+        }));
+        console.log(`Sending active users for document ${documentId}:`, activeUsers);
+        safeEmit('active-users', activeUsers);
+      } else {
+        console.log(`No room found for document ${documentId}`);
+        safeEmit('active-users', []);
+      }
+    } catch (error) {
+      console.error('[WebSocket] Error in get-active-users:', error.message);
+      safeEmit('active-users', []);
+    }
+  }));
 });
 
 // API Routes
@@ -590,13 +638,19 @@ app.post('/api/execute', requireClerkAuth, async (req, res) => {
     }, req.user.id);
 
     // Emit result via WebSocket to all clients viewing this document
+    // CRITICAL: Wrap in try-catch to prevent WebSocket errors from breaking the connection
     if (documentId) {
-      io.to(documentId).emit('code-execution-result', {
-        documentId,
-        userId: req.user.id,
-        language,
-        ...result,
-      });
+      try {
+        io.to(documentId).emit('code-execution-result', {
+          documentId,
+          userId: req.user.id,
+          language,
+          ...result,
+        });
+      } catch (wsError) {
+        console.error('[API] Failed to emit WebSocket result (non-fatal):', wsError.message);
+        // Don't throw - HTTP response still needs to be sent
+      }
     }
 
     res.json({

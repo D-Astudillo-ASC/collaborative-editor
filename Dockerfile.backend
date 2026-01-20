@@ -2,14 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# PREVIOUS IMPLEMENTATION (commented out):
-# - Used `npm install` and `package*.json`, which is not reproducible now that we standardized on pnpm.
-#
-# Reason for change:
-# - Fly builds should match local/CI dependency resolution. We install via pnpm using the lockfile.
-#
-# COPY server/package*.json ./
-# RUN npm install
+# Install Docker CLI only (not daemon) - connects to remote Docker daemon via DOCKER_HOST
+# The DOCKER_HOST environment variable points to the separate Docker daemon service
+# CRITICAL: IPv6 addresses MUST be wrapped in square brackets: tcp://[fdaa:...]:2375
+# Set via: flyctl secrets set DOCKER_HOST=tcp://[fdaa:3d:ad8c:a7b:5fe:cc0b:a3f5:2]:2375
+RUN apk add --no-cache docker-cli
 
 # Enable pnpm via Corepack (bundled with Node 18)
 RUN corepack enable
