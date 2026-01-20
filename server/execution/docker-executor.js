@@ -34,6 +34,28 @@ const MAX_CPUS = '1'; // 1 CPU core
 const MAX_TEMP_SIZE = '10m'; // 10MB temp filesystem
 
 /**
+ * Build a safe environment for Docker child processes
+ * 
+ * Docker processes ONLY need:
+ * - DOCKER_HOST (to connect to remote Docker daemon)
+ * - PATH (to find docker binary)
+ * - Basic system vars (HOME, USER, LANG) for compatibility
+ */
+function getSafeDockerEnv() {
+  const safeEnv = {
+    // CRITICAL: Only DOCKER_HOST is needed for remote Docker daemon
+    ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
+    // System vars needed for docker CLI to function
+    PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    // Optional: Basic compatibility vars (not secrets)
+    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    ...(process.env.USER ? { USER: process.env.USER } : {}),
+    ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
+  };
+  return safeEnv;
+}
+
+/**
  * Check if Docker is available
  * CRITICAL FIX: Added timeout to prevent hanging if Docker daemon is unresponsive
  */
@@ -73,18 +95,16 @@ export async function checkDockerImage(imageName) {
     if (dockerHost) {
       console.log(`[Docker] Checking image ${imageName} on remote Docker daemon: ${dockerHost}`);
     }
-    
+
     // Try docker images with filter first (more reliable for remote daemons)
     // Format: REPOSITORY:TAG (e.g., registry.fly.io/app:tag)
-    const [repo, tag] = imageName.includes(':') 
+    const [repo, tag] = imageName.includes(':')
       ? imageName.split(':')
       : [imageName, 'latest'];
-    
+
     const checkProcess = spawn('docker', ['images', '--format', '{{.Repository}}:{{.Tag}}', '--filter', `reference=${imageName}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env, // Inherit all env vars including DOCKER_HOST
-      },
+      env: getSafeDockerEnv(), // CRITICAL SECURITY: Only pass safe env vars, not secrets
     });
 
     // Add timeout to prevent hanging (5 seconds)
@@ -96,25 +116,25 @@ export async function checkDockerImage(imageName) {
 
     let output = '';
     let errorOutput = '';
-    
+
     checkProcess.stdout.on('data', (data) => {
       output += data.toString();
     });
-    
+
     checkProcess.stderr.on('data', (data) => {
       errorOutput += data.toString();
     });
 
     checkProcess.on('close', (code) => {
       clearTimeout(timeout);
-      
+
       if (errorOutput) {
         console.log(`[Docker] Stderr for ${imageName}: ${errorOutput.trim()}`);
       }
-      
+
       // Check if the image name appears in the output
       const exists = code === 0 && output.trim().length > 0 && output.includes(imageName);
-      
+
       if (!exists) {
         console.log(`[Docker] Image ${imageName} not found (exit code ${code})`);
         if (output.trim()) {
@@ -143,9 +163,7 @@ async function checkDockerImageFallback(imageName) {
   return new Promise((resolve) => {
     const checkProcess = spawn('docker', ['image', 'inspect', imageName], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-      },
+      env: getSafeDockerEnv(), // CRITICAL SECURITY: Only pass safe env vars, not secrets
     });
 
     const timeout = setTimeout(() => {
@@ -232,10 +250,19 @@ export async function executePythonDocker(code, filePath, timeout, maxOutputSize
 
     const dockerProcess = spawn('docker', dockerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'], // stdin, stdout, stderr
-      env: {
-        ...process.env,
-        // Don't pass sensitive environment variables
-      },
+      env: getSafeDockerEnv(), // CRITICAL SECURITY: Only pass safe env vars, not secrets
+    });
+
+    // CRITICAL FIX: Add spawn timeout to prevent hanging if Docker daemon is unresponsive
+    const spawnTimeout = setTimeout(() => {
+      if (!dockerProcess.killed) {
+        dockerProcess.kill('SIGKILL');
+        reject(new Error('Docker process spawn timeout - Docker daemon may be unresponsive'));
+      }
+    }, 5000); // 5 second spawn timeout
+
+    dockerProcess.on('spawn', () => {
+      clearTimeout(spawnTimeout);
     });
 
     // Write Python code to stdin
@@ -341,6 +368,7 @@ export async function executeJavaDocker(code, filePath, className, timeout, maxO
 
     const runProcess = spawn('docker', compileAndRunArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: getSafeDockerEnv(), // CRITICAL SECURITY: Only pass safe env vars, not secrets
     });
 
     // CRITICAL FIX: Add spawn timeout to prevent hanging if Docker daemon is unresponsive

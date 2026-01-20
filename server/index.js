@@ -145,6 +145,34 @@ io.use(socketClerkAuth());
 io.on('connection', (socket) => {
   console.log('New client connected, socket ID:', socket.id);
 
+  // CRITICAL: Error boundary for socket events - prevents errors from disconnecting users
+  const safeEmit = (event, data) => {
+    try {
+      socket.emit(event, data);
+    } catch (error) {
+      console.error(`[WebSocket] Error emitting ${event}:`, error.message);
+      // Don't throw - keep connection alive
+    }
+  };
+
+  // CRITICAL: Wrap socket event handlers to catch errors
+  const wrapHandler = (handler) => {
+    return async (...args) => {
+      try {
+        await handler(...args);
+      } catch (error) {
+        console.error('[WebSocket] Unhandled error in socket handler:', error);
+        console.error('[WebSocket] Error stack:', error.stack);
+        // Emit error to client but keep connection alive
+        safeEmit('error', {
+          message: 'An error occurred. Your connection is still active.',
+          type: 'handler_error'
+        });
+        // Don't rethrow - keep WebSocket connection alive
+      }
+    };
+  };
+
   /*
   PREVIOUS IMPLEMENTATION (commented out):
   - join-document accepted only a documentId string
@@ -178,7 +206,7 @@ io.on('connection', (socket) => {
     const linkToken = typeof payload === 'object' ? payload?.linkToken : null;
 
     if (!documentId) {
-      socket.emit('error', { message: 'missing_documentId' });
+      safeEmit('error', { message: 'missing_documentId' });
       return;
     }
 
