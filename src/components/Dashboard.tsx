@@ -84,14 +84,69 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Helper function to determine language from template
+  const getLanguageFromTemplate = (templateKey: CodeTemplateKey): string => {
+    const template = CODE_TEMPLATES[templateKey];
+    if (!template) {
+      return 'tsx'; // Default
+    }
+    
+    const languages = template.languages;
+    if (!languages) {
+      return 'tsx'; // Default
+    }
+    
+    // Convert readonly array to regular array to check length
+    const langArray = [...languages];
+    if (langArray.length === 0) {
+      return 'tsx'; // Default
+    }
+    
+    // Prefer language-specific templates
+    // Map template keys to their primary language
+    const templateToLanguage: Record<string, string> = {
+      javaClass: 'java',
+      javaInterface: 'java',
+      javaMain: 'java',
+      javaMainSimple: 'java',
+      pythonClass: 'python',
+      pythonFunction: 'python',
+      pythonMain: 'python',
+      pythonMainSimple: 'python',
+      reactTSXComponent: 'tsx',
+      reactComponent: 'tsx', // Default to TSX for React
+      reactHook: 'tsx',
+      typescriptReact: 'tsx', // TypeScript React best practices
+      expressRoute: 'typescript',
+      nodeClass: 'typescript',
+      typescriptInterface: 'typescript',
+      asyncFunction: 'typescript',
+      testFile: 'typescript',
+      htmlTemplate: 'html', // HTML template maps to HTML language
+    };
+    
+    // Check if template has a specific language mapping
+    if (templateToLanguage[templateKey]) {
+      return templateToLanguage[templateKey];
+    }
+    
+    // Otherwise, use the first language from the template's languages array
+    // Type assertion needed because template.languages is readonly array
+    const firstLang = template.languages[0];
+    return typeof firstLang === 'string' ? firstLang : 'tsx';
+  };
+
   const handleCreateDocument = async () => {
     if (!newDocTitle.trim()) return;
-
 
     try {
       const token = await getAccessToken();
       if (!token) return;
       const template = CODE_TEMPLATES[selectedTemplate];
+      
+      // Determine the language from the selected template
+      const language = getLanguageFromTemplate(selectedTemplate);
+      
       const response = await fetch(apiUrl('/api/documents'), {
         method: 'POST',
         headers: {
@@ -124,8 +179,8 @@ const Dashboard: React.FC = () => {
       setNewDocTitle('');
       setSelectedTemplate('blank');
 
-      // Navigate to the new document
-      navigate(`/document/${newDoc.id}`);
+      // Navigate to the new document with language parameter
+      navigate(`/document/${newDoc.id}?language=${language}`);
     } catch (error) {
       console.error('Failed to create document:', error);
       // You could add error handling here (show a snackbar, etc.)

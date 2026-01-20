@@ -1,0 +1,17 @@
+# Python execution sandbox
+# Minimal Python image with security hardening
+FROM python:3.11-slim
+
+# Create non-root user for execution
+RUN useradd -m -u 1000 executor && \
+    mkdir -p /code && \
+    chown -R executor:executor /code
+
+# Set working directory
+WORKDIR /code
+
+# Switch to non-root user
+USER executor
+
+# Default command (will be overridden)
+CMD ["python3", "-u", "/code/script.py"]

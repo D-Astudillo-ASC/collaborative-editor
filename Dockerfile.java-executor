@@ -1,0 +1,20 @@
+# Java execution sandbox
+# Minimal OpenJDK image with security hardening
+# Using Eclipse Temurin (official OpenJDK distribution)
+# Note: openjdk:17-jdk-slim was deprecated, replaced with eclipse-temurin
+# Using Debian-based image for better compatibility (Alpine can have glibc issues)
+FROM eclipse-temurin:17-jdk-jammy
+
+# Create non-root user for execution
+RUN useradd -m -u 1000 executor && \
+    mkdir -p /code && \
+    chown -R executor:executor /code
+
+# Set working directory
+WORKDIR /code
+
+# Switch to non-root user
+USER executor
+
+# Default command (will be overridden)
+CMD ["java", "-Xmx256m", "-Xms64m", "Main"]

@@ -20,6 +20,8 @@ import { MonacoBinding } from 'y-monaco';
 import { Awareness } from 'y-protocols/awareness';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import Chat from './Chat';
+import LivePreview from './LivePreview';
+import ExecutionPanel from './ExecutionPanel';
 import { apiUrl } from '../config/backend';
 
 // Language definitions with syntax highlighting
@@ -53,6 +55,12 @@ const SUPPORTED_LANGUAGES = {
     extension: '.py',
     monacoLanguage: 'python',
     icon: '🐍'
+  },
+  html: {
+    name: 'HTML',
+    extension: '.html',
+    monacoLanguage: 'html',
+    icon: '🌐'
   }
 };
 
@@ -475,6 +483,17 @@ public class Main {
     }
 }`
   },
+  javaMainSimple: {
+    name: 'Java Main Method',
+    description: 'Simple Java main method template',
+    languages: ['java'],
+    content: `public class Main {
+    public static void main(String[] args) {
+        // Your code here
+        $0
+    }
+}`
+  },
   // Python Templates
   pythonClass: {
     name: 'Python Class',
@@ -605,11 +624,23 @@ def main(args: List[str]) -> int:
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))`
   },
+  pythonMainSimple: {
+    name: 'Python Main Method',
+    description: 'Simple Python main method template',
+    languages: ['python'],
+    content: `def main():
+    # Your code here
+    $0
+
+
+if __name__ == "__main__":
+    main()`
+  },
   // HTML Template (Universal)
   htmlTemplate: {
     name: 'HTML Template',
     description: 'HTML5 boilerplate with meta tags',
-    languages: ['javascript', 'typescript', 'tsx', 'java', 'python'],
+    languages: ['html', 'javascript', 'typescript', 'tsx', 'java', 'python'],
     content: `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -664,6 +695,7 @@ const CodeEditor: React.FC = () => {
   const { token, isAuthenticated, isLoaded } = useAuth();
   const [searchParams] = useSearchParams();
   const linkToken = searchParams.get('token');
+  const languageParam = searchParams.get('language') as keyof typeof SUPPORTED_LANGUAGES | null;
 
   // PREVIOUS IMPLEMENTATION (commented out):
   // - Seeded the editor with a hard-coded TSX template in local state.
@@ -691,12 +723,31 @@ const CodeEditor: React.FC = () => {
   // Chat functionality
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
 
+  // Live preview functionality
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+
+  // Code execution functionality
+  const [isExecutionPanelOpen, setIsExecutionPanelOpen] = useState<boolean>(false);
+
   // Template system
   const [selectedTemplate, setSelectedTemplate] = useState<string>('blank');
   const [showTemplateSelector, setShowTemplateSelector] = useState<boolean>(false);
 
-  // Language support
-  const [selectedLanguage, setSelectedLanguage] = useState<keyof typeof SUPPORTED_LANGUAGES>('tsx');
+  // Language support - initialize from URL param if present, otherwise default to tsx
+  const [selectedLanguage, setSelectedLanguage] = useState<keyof typeof SUPPORTED_LANGUAGES>(
+    (languageParam && languageParam in SUPPORTED_LANGUAGES) ? languageParam : 'tsx'
+  );
+  
+  // Update language if URL param changes (e.g., when navigating from Dashboard with template)
+  // Note: This effect runs after handleLanguageChange is defined, so we can safely reference it
+  useEffect(() => {
+    if (languageParam && languageParam in SUPPORTED_LANGUAGES && languageParam !== selectedLanguage) {
+      console.log(`🌐 Language from URL param: ${languageParam}`);
+      setSelectedLanguage(languageParam);
+      // Language change will be handled by handleLanguageChange when editor is ready
+      // We set the state here, and handleLanguageChange will be called when editor mounts
+    }
+  }, [languageParam, selectedLanguage]);
 
   // Refs
   const editorRef = useRef<any>(null);
@@ -921,34 +972,498 @@ const CodeEditor: React.FC = () => {
     }
   }, [id]);
 
+  // Configure Monaco language services for Java/Python (production-grade)
+  // This is idempotent: safe to call multiple times (Monaco handles duplicate registrations)
+  const configureLanguageService = useCallback((language: keyof typeof SUPPORTED_LANGUAGES) => {
+    const langConfig = SUPPORTED_LANGUAGES[language];
+    if (!langConfig) return;
+
+    // Explicitly register Java language (ensures syntax highlighting is available)
+    if (language === 'java') {
+      // Check if Java is already registered (Monaco has it built-in)
+      const javaLang = monaco.languages.getLanguages().find(l => l.id === 'java');
+      if (!javaLang) {
+        // Only register if not already present (shouldn't happen with built-in languages)
+        try {
+          monaco.languages.register({ id: 'java', extensions: ['.java'], aliases: ['Java', 'java'] });
+          console.log('✅ Registered Java language');
+        } catch (e) {
+          // Language already registered, ignore
+          console.log('ℹ️ Java language already registered');
+        }
+      } else {
+        console.log('ℹ️ Java language already available (built-in)');
+      }
+      // setLanguageConfiguration is idempotent - safe to call multiple times
+      monaco.languages.setLanguageConfiguration('java', {
+        comments: {
+          lineComment: '//',
+          blockComment: ['/*', '*/'],
+        },
+        brackets: [
+          ['{', '}'],
+          ['[', ']'],
+          ['(', ')'],
+        ],
+        autoClosingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+        ],
+        surroundingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+        ],
+        indentationRules: {
+          increaseIndentPattern: /^\s*(if|else|for|while|switch|case|try|catch|finally|synchronized|do)\b.*$/,
+          decreaseIndentPattern: /^\s*(else|catch|finally)\b.*$/,
+        },
+        wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+      });
+
+      // Register Java-specific completion provider (word-based + snippets)
+      monaco.languages.registerCompletionItemProvider('java', {
+        provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          // Common Java keywords and patterns
+          const suggestions = [
+            { label: 'public', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'public ' },
+            { label: 'private', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'private ' },
+            { label: 'protected', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'protected ' },
+            { label: 'class', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'class ' },
+            { label: 'interface', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'interface ' },
+            { label: 'extends', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'extends ' },
+            { label: 'implements', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'implements ' },
+            { label: 'void', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'void ' },
+            { label: 'return', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'return ' },
+            { label: 'this', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'this' },
+            { label: 'super', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'super' },
+            { label: 'static', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'static ' },
+            { label: 'final', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'final ' },
+            { label: 'String', kind: monaco.languages.CompletionItemKind.Class, insertText: 'String' },
+            { label: 'int', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'int ' },
+            { label: 'boolean', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'boolean ' },
+            { label: 'System.out.println', kind: monaco.languages.CompletionItemKind.Method, insertText: 'System.out.println($0);', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+          ];
+
+          return { suggestions: suggestions.map(s => ({ ...s, range })) };
+        },
+      });
+    }
+
+    // Explicitly register Python language (ensures syntax highlighting is available)
+    if (language === 'python') {
+      // Check if Python is already registered (Monaco has it built-in)
+      const pythonLang = monaco.languages.getLanguages().find(l => l.id === 'python');
+      if (!pythonLang) {
+        // Only register if not already present (shouldn't happen with built-in languages)
+        try {
+          monaco.languages.register({ id: 'python', extensions: ['.py'], aliases: ['Python', 'python'] });
+          console.log('✅ Registered Python language');
+        } catch (e) {
+          // Language already registered, ignore
+          console.log('ℹ️ Python language already registered');
+        }
+      } else {
+        console.log('ℹ️ Python language already available (built-in)');
+      }
+      monaco.languages.setLanguageConfiguration('python', {
+        comments: {
+          lineComment: '#',
+        },
+        brackets: [
+          ['{', '}'],
+          ['[', ']'],
+          ['(', ')'],
+        ],
+        autoClosingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+          { open: '"""', close: '"""' },
+          { open: "'''", close: "'''" },
+        ],
+        surroundingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+        ],
+        indentationRules: {
+          increaseIndentPattern: /^\s*(if|elif|else|for|while|try|except|finally|with|def|class|async def)\b.*:\s*$/,
+          decreaseIndentPattern: /^\s*(elif|else|except|finally)\b.*:\s*$/,
+        },
+        wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+      });
+
+      // Register Python-specific completion provider (word-based + snippets)
+      monaco.languages.registerCompletionItemProvider('python', {
+        provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          // Common Python keywords and patterns
+          const suggestions = [
+            { label: 'def', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'def ${1:function_name}($2):\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'class', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'class ${1:ClassName}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'if', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'if ${1:condition}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'elif', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'elif ${1:condition}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'else', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'else:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'for', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'for ${1:item} in ${2:iterable}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'while', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'while ${1:condition}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'try', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'try:\n    $1\nexcept ${2:Exception} as ${3:e}:\n    $0', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'return', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'return ' },
+            { label: 'print', kind: monaco.languages.CompletionItemKind.Function, insertText: 'print($0)', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'import', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'import ' },
+            { label: 'from', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'from ${1:module} import ${2:name}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'self', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'self' },
+            { label: 'None', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'None' },
+            { label: 'True', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'True' },
+            { label: 'False', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'False' },
+            { label: 'str', kind: monaco.languages.CompletionItemKind.Class, insertText: 'str' },
+            { label: 'int', kind: monaco.languages.CompletionItemKind.Class, insertText: 'int' },
+            { label: 'list', kind: monaco.languages.CompletionItemKind.Class, insertText: 'list' },
+            { label: 'dict', kind: monaco.languages.CompletionItemKind.Class, insertText: 'dict' },
+          ];
+
+          return { suggestions: suggestions.map(s => ({ ...s, range })) };
+        },
+      });
+    }
+
+    // HTML: configure language configuration for proper syntax highlighting
+    if (language === 'html') {
+      // Check if HTML is already registered (Monaco has it built-in)
+      const htmlLang = monaco.languages.getLanguages().find(l => l.id === 'html');
+      if (!htmlLang) {
+        try {
+          monaco.languages.register({ id: 'html', extensions: ['.html', '.htm'], aliases: ['HTML', 'html'] });
+          console.log('✅ Registered HTML language');
+        } catch (e) {
+          console.log('ℹ️ HTML language already registered');
+        }
+      } else {
+        console.log('ℹ️ HTML language already available (built-in)');
+      }
+      
+      // Configure HTML language settings
+      monaco.languages.setLanguageConfiguration('html', {
+        comments: {
+          blockComment: ['<!--', '-->'],
+        },
+        brackets: [
+          ['<', '>'],
+          ['{', '}'],
+          ['[', ']'],
+          ['(', ')'],
+        ],
+        autoClosingPairs: [
+          { open: '<', close: '>', notIn: ['string'] },
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+        ],
+        surroundingPairs: [
+          { open: '<', close: '>' },
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+        ],
+        wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+      });
+
+      // Register HTML-specific completion provider
+      monaco.languages.registerCompletionItemProvider('html', {
+        provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          // Common HTML tags and attributes
+          const suggestions = [
+            { label: 'div', kind: monaco.languages.CompletionItemKind.Property, insertText: '<div>$0</div>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'span', kind: monaco.languages.CompletionItemKind.Property, insertText: '<span>$0</span>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'p', kind: monaco.languages.CompletionItemKind.Property, insertText: '<p>$0</p>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'h1', kind: monaco.languages.CompletionItemKind.Property, insertText: '<h1>$0</h1>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'h2', kind: monaco.languages.CompletionItemKind.Property, insertText: '<h2>$0</h2>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'h3', kind: monaco.languages.CompletionItemKind.Property, insertText: '<h3>$0</h3>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'a', kind: monaco.languages.CompletionItemKind.Property, insertText: '<a href="$1">$0</a>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'img', kind: monaco.languages.CompletionItemKind.Property, insertText: '<img src="$1" alt="$2" />', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'button', kind: monaco.languages.CompletionItemKind.Property, insertText: '<button>$0</button>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'input', kind: monaco.languages.CompletionItemKind.Property, insertText: '<input type="$1" name="$2" />', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'form', kind: monaco.languages.CompletionItemKind.Property, insertText: '<form action="$1" method="$2">\n    $0\n</form>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'ul', kind: monaco.languages.CompletionItemKind.Property, insertText: '<ul>\n    <li>$0</li>\n</ul>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'ol', kind: monaco.languages.CompletionItemKind.Property, insertText: '<ol>\n    <li>$0</li>\n</ol>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'table', kind: monaco.languages.CompletionItemKind.Property, insertText: '<table>\n    <tr>\n        <th>$0</th>\n    </tr>\n</table>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'script', kind: monaco.languages.CompletionItemKind.Property, insertText: '<script>\n    $0\n</script>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'style', kind: monaco.languages.CompletionItemKind.Property, insertText: '<style>\n    $0\n</style>', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'link', kind: monaco.languages.CompletionItemKind.Property, insertText: '<link rel="$1" href="$2" />', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'meta', kind: monaco.languages.CompletionItemKind.Property, insertText: '<meta name="$1" content="$2" />', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+          ];
+
+          return { suggestions: suggestions.map(s => ({ ...s, range })) };
+        },
+      });
+    }
+  }, []);
+
+  // Get default template for a language
+  const getDefaultTemplateForLanguage = useCallback((language: keyof typeof SUPPORTED_LANGUAGES): string => {
+    // Find the first template that supports this language
+    // Prefer language-specific templates (javaClass, pythonClass, etc.)
+    // Note: For Java, we default to javaClass, but javaMainSimple is also available
+    const languageSpecificKeys: Record<string, string> = {
+      java: 'javaClass',
+      python: 'pythonClass',
+      html: 'htmlTemplate',
+      javascript: 'blank',
+      typescript: 'blank',
+      tsx: 'reactTSXComponent',
+    };
+
+    const preferredKey = languageSpecificKeys[language];
+    if (preferredKey && CODE_TEMPLATES[preferredKey as keyof typeof CODE_TEMPLATES]) {
+      const template = CODE_TEMPLATES[preferredKey as keyof typeof CODE_TEMPLATES];
+      if (template.languages && template.languages.includes(language)) {
+        return template.content;
+      }
+    }
+
+    // Fallback: find any template that supports this language
+    const templates = Object.entries(CODE_TEMPLATES);
+    for (const [key, template] of templates) {
+      if (template.languages && template.languages.includes(language) && key !== 'blank') {
+        return template.content;
+      }
+    }
+
+    // Final fallback to blank template
+    return CODE_TEMPLATES.blank.content;
+  }, []);
+
   // Language change handler
   const handleLanguageChange = useCallback((newLanguage: keyof typeof SUPPORTED_LANGUAGES) => {
     const newMonacoLanguage = SUPPORTED_LANGUAGES[newLanguage]?.monacoLanguage || 'javascript';
     console.log(`🔄 Switching to: ${SUPPORTED_LANGUAGES[newLanguage]?.name} (${newMonacoLanguage})`);
     setSelectedLanguage(newLanguage);
 
+    // Check if document is empty/minimal - only then load template
+    // This prevents accidental data loss while still providing templates for empty documents
+    const shouldLoadTemplate = (() => {
+      if (editorRef.current) {
+        const model = editorRef.current.getModel();
+        if (model) {
+          const currentValue = model.getValue().trim();
+          // Only load template if document is empty or just whitespace
+          return currentValue.length === 0;
+        }
+      }
+      // If no model exists yet, load template
+      return true;
+    })();
+
+    // Get the default template for the new language (only used if shouldLoadTemplate is true)
+    const templateContent = getDefaultTemplateForLanguage(newLanguage);
+
+    if (shouldLoadTemplate) {
+      console.log(`📝 Loading template for ${newLanguage} (document is empty)`);
+    } else {
+      console.log(`🔄 Changing language to ${newLanguage} (preserving existing content)`);
+    }
+
     // Force Monaco to recognize the language change
     if (editorRef.current && monacoRef.current) {
       const model = editorRef.current.getModel();
       if (model) {
-        monacoRef.current.editor.setModelLanguage(model, newMonacoLanguage);
+        const langConfig = SUPPORTED_LANGUAGES[newLanguage];
+        const extension = langConfig?.extension || '.txt';
 
-        // For TSX files, ensure TypeScript language service is properly configured
-        if (newLanguage === 'tsx') {
-          setTimeout(() => {
-            monacoRef.current.editor.setModelLanguage(model, 'typescript');
-            console.log('🔧 Re-applied TypeScript language for TSX after language change');
-          }, 50);
+        // Configure language-specific services FIRST (ensures language is registered)
+        configureLanguageService(newLanguage);
+
+        // For Java/Python/HTML, create a new model with proper URI for better language service support
+        if (newLanguage === 'java' || newLanguage === 'python' || newLanguage === 'html') {
+          // Get current content or template based on whether document is empty
+          const contentToUse = shouldLoadTemplate ? templateContent : model.getValue();
+          const newUri = monacoRef.current.Uri.file(`file${extension}`);
+          // Create model with content (template if empty, existing content otherwise)
+          const newModel = monacoRef.current.editor.createModel(contentToUse, newMonacoLanguage, newUri);
+
+          // Verify language is set correctly
+          if (newModel.getLanguageId() !== newMonacoLanguage) {
+            console.warn(`⚠️ Model language mismatch: expected ${newMonacoLanguage}, got ${newModel.getLanguageId()}`);
+            monacoRef.current.editor.setModelLanguage(newModel, newMonacoLanguage);
+          }
+
+          editorRef.current.setModel(newModel);
+
+          // Update Yjs with the new content if Yjs is already initialized
+          if (yDocRef.current) {
+            const yText = yDocRef.current.getText('content'); // Use 'content' key, not 'monaco'
+            // Replace Yjs content (template if empty, existing content otherwise)
+            yDocRef.current.transact(() => {
+              yText.delete(0, yText.length);
+              yText.insert(0, contentToUse);
+            }, 'language-change');
+            console.log(shouldLoadTemplate ? '🔄 Updated Yjs content with template' : '🔄 Updated Yjs content (preserved existing)');
+
+            // Rebind Yjs to the new model
+            if (bindingRef.current) {
+              bindingRef.current.destroy();
+            }
+            bindingRef.current = new MonacoBinding(yText, newModel, new Set([editorRef.current]));
+            console.log('🔄 Rebound Yjs to new model after language change');
+          }
+
+          model.dispose(); // Clean up old model
+          console.log(`🔧 Created ${newMonacoLanguage} model with ${extension} URI${shouldLoadTemplate ? ' and template content' : ' (preserved existing content)'}`);
+        } else {
+          // For TSX, create a new model with proper .tsx URI and TypeScript language service
+          if (newLanguage === 'tsx') {
+            const currentValue = model.getValue();
+            const contentToUse = shouldLoadTemplate ? templateContent : currentValue;
+            const newUri = monacoRef.current.Uri.file('App.tsx');
+            // Create new model with TypeScript language (TSX uses TypeScript language service)
+            const newModel = monacoRef.current.editor.createModel(contentToUse, 'typescript', newUri);
+
+            editorRef.current.setModel(newModel);
+
+            // Reconfigure TypeScript language service for TSX
+            const tsDefaults = (monacoRef.current as typeof monaco).typescript.typescriptDefaults;
+            tsDefaults.setCompilerOptions({
+              target: monaco.typescript.ScriptTarget.Latest,
+              allowNonTsExtensions: true,
+              moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
+              module: monaco.typescript.ModuleKind.CommonJS,
+              noEmit: true,
+              esModuleInterop: true,
+              jsx: monaco.typescript.JsxEmit.ReactJSX,
+              reactNamespace: "React",
+              allowJs: true,
+              typeRoots: ["node_modules/@types", "src/@types"],
+            });
+
+            tsDefaults.setDiagnosticsOptions({
+              noSemanticValidation: false,
+              noSyntaxValidation: false,
+            });
+
+            // Reload React types when switching back to TSX (async, but don't block)
+            (async () => {
+              try {
+                const reactResponse = await fetch('https://unpkg.com/@types/react@18.2.0/index.d.ts');
+                const reactTypes = await reactResponse.text();
+                tsDefaults.addExtraLib(reactTypes, "file:///node_modules/@types/react/index.d.ts");
+
+                const reactDomResponse = await fetch('https://unpkg.com/@types/react-dom@18.2.0/index.d.ts');
+                const reactDomTypes = await reactDomResponse.text();
+                tsDefaults.addExtraLib(reactDomTypes, "file:///node_modules/@types/react-dom/index.d.ts");
+
+                console.log('✅ Reloaded React types for TSX after language change');
+              } catch (error) {
+                console.warn('⚠️ Could not reload React types:', error);
+              }
+            })();
+
+            // Add JSX runtime types
+            tsDefaults.addExtraLib(
+              `declare module 'react/jsx-runtime' {
+                export function jsx(type: any, props: any, key?: any): any;
+                export function jsxs(type: any, props: any, key?: any): any;
+                export function Fragment(props: { children?: any }): any;
+              }`,
+              "file:///node_modules/@types/react/jsx-runtime.d.ts"
+            );
+
+            // Update Yjs if initialized
+            if (yDocRef.current) {
+              const yText = yDocRef.current.getText('content'); // Use 'content' key, not 'monaco'
+              yDocRef.current.transact(() => {
+                yText.delete(0, yText.length);
+                yText.insert(0, contentToUse);
+              }, 'language-change');
+
+              // Rebind Yjs to the new model
+              if (bindingRef.current) {
+                bindingRef.current.destroy();
+              }
+              bindingRef.current = new MonacoBinding(yText, newModel, new Set([editorRef.current]));
+              console.log(shouldLoadTemplate ? '🔄 Rebound Yjs to new TSX model with template' : '🔄 Rebound Yjs to new TSX model (preserved existing content)');
+            }
+
+            model.dispose(); // Clean up old model
+            console.log('🔧 Created TypeScript model with .tsx URI for TSX support');
+          } else {
+            // For other languages (JavaScript, TypeScript), update the model language
+            monacoRef.current.editor.setModelLanguage(model, newMonacoLanguage);
+
+            // Only update content if document is empty
+            if (shouldLoadTemplate) {
+              model.setValue(templateContent);
+
+              // Update Yjs if initialized
+              if (yDocRef.current) {
+                const yText = yDocRef.current.getText('content'); // Use 'content' key, not 'monaco'
+                yDocRef.current.transact(() => {
+                  yText.delete(0, yText.length);
+                  yText.insert(0, templateContent);
+                }, 'language-change');
+                console.log('🔄 Updated Yjs content with template');
+              }
+            } else {
+              // Just update language, preserve content
+              console.log('🔄 Changed language, preserved existing content');
+            }
+          }
+        }
+
+        // Update React state to reflect current content
+        const finalContent = shouldLoadTemplate ? templateContent : (editorRef.current?.getModel()?.getValue() || '');
+        setContent(finalContent);
+        lastSavedContent.current = finalContent;
+        if (shouldLoadTemplate) {
+          setSelectedTemplate('blank'); // Reset template selector since we auto-loaded
         }
       }
     }
+  }, [configureLanguageService, getDefaultTemplateForLanguage]);
 
-    // Load language-specific template if available
-    const template = CODE_TEMPLATES.blank;
-    if (template && template.content !== content) {
-      setContent(template.content);
+  // Debug: Log when template selector opens/closes
+  useEffect(() => {
+    if (showTemplateSelector) {
+      console.log('🎯 Template Selector Opened!');
+      console.log(`📌 Current selectedLanguage: "${selectedLanguage}"`);
+      console.log(`📋 All templates:`, Object.keys(CODE_TEMPLATES));
     }
-  }, [content]);
+  }, [showTemplateSelector, selectedLanguage]);
 
   // Initialize user ID
   useEffect(() => {
@@ -1093,6 +1608,13 @@ const CodeEditor: React.FC = () => {
     } else {
       pendingInitRef.current = init;
     }
+
+    // Observe Y.Text changes to update content state for live preview
+    // This ensures the preview updates in real-time as the document changes
+    yText.observe((event: Y.YTextEvent) => {
+      const currentText = yText.toString();
+      setContent(currentText);
+    });
 
     // Broadcast local Yjs updates
     // PREVIOUS IMPLEMENTATION (commented out):
@@ -1430,6 +1952,12 @@ const CodeEditor: React.FC = () => {
     monacoRef.current = monacoInstance;
 
     console.log('✅ Editor mounted successfully');
+    
+    // If language param is present and different from current language, apply it now that editor is ready
+    if (languageParam && languageParam in SUPPORTED_LANGUAGES && languageParam !== selectedLanguage) {
+      console.log(`🌐 Applying language from URL param: ${languageParam}`);
+      handleLanguageChange(languageParam);
+    }
 
     // PREVIOUS IMPLEMENTATION (commented out):
     // - Applied pending init before Monaco finished setting up (and potentially replacing the model).
@@ -1442,10 +1970,14 @@ const CodeEditor: React.FC = () => {
     //   pendingInitRef.current = null;
     // }
 
-    // Demo project approach - file-specific JSX configuration
-    if (monacoInstance && selectedLanguage === 'tsx') {
+    // Configure language services based on selected language
+    const langConfig = SUPPORTED_LANGUAGES[selectedLanguage];
+    const monacoLanguage = langConfig?.monacoLanguage || 'javascript';
+    const extension = langConfig?.extension || '.txt';
+
+    // TypeScript/TSX: full language service configuration
+    if (selectedLanguage === 'tsx') {
       // In Monaco 0.55.1+, access TypeScript API via the typescript namespace
-      // Use type assertion to access the typescript API from monacoInstance
       const tsDefaults = (monacoInstance as typeof monaco).typescript.typescriptDefaults;
 
       tsDefaults.setCompilerOptions({
@@ -1467,29 +1999,18 @@ const CodeEditor: React.FC = () => {
       });
 
       // Load official React types with full documentation from CDN
-      // This gives you the same experience as Cursor with official React docs
       try {
-        // Load React types from CDN (same as your project's version)
         const reactResponse = await fetch('https://unpkg.com/@types/react@18.2.0/index.d.ts');
         const reactTypes = await reactResponse.text();
-        tsDefaults.addExtraLib(
-          reactTypes,
-          "file:///node_modules/@types/react/index.d.ts"
-        );
+        tsDefaults.addExtraLib(reactTypes, "file:///node_modules/@types/react/index.d.ts");
 
-        // Load React DOM types from CDN
         const reactDomResponse = await fetch('https://unpkg.com/@types/react-dom@18.2.0/index.d.ts');
         const reactDomTypes = await reactDomResponse.text();
-        tsDefaults.addExtraLib(
-          reactDomTypes,
-          "file:///node_modules/@types/react-dom/index.d.ts"
-        );
+        tsDefaults.addExtraLib(reactDomTypes, "file:///node_modules/@types/react-dom/index.d.ts");
 
         console.log('✅ Loaded official React types with documentation from CDN');
       } catch (error) {
         console.warn('⚠️ Could not load official React types, using fallback:', error);
-
-        // Fallback minimal types if loading fails
         tsDefaults.addExtraLib(
           `declare module 'react' {
             export function useState<T>(initialState: T | (() => T)): [T, (value: T | ((prev: T) => T)) => void];
@@ -1513,7 +2034,6 @@ const CodeEditor: React.FC = () => {
         );
       }
 
-      // Add JSX runtime types - exactly like demo project
       tsDefaults.addExtraLib(
         `declare module 'react/jsx-runtime' {
           export function jsx(type: any, props: any, key?: any): any;
@@ -1523,43 +2043,25 @@ const CodeEditor: React.FC = () => {
         "file:///node_modules/@types/react/jsx-runtime.d.ts"
       );
 
-
-      // PREVIOUS IMPLEMENTATION (commented out):
-      // - Created a Monaco model pre-filled with local `content`.
-      //
-      // Reason for change:
-      // - The authoritative content is Yjs state. Pre-filling the model can create a race where MonacoBinding syncs
-      //   the wrong initial text and emits updates that overwrite the persisted template.
-      //
-      // const model = monacoInstance.editor.createModel(content, "typescript", monacoInstance.Uri.file('App.tsx'));
-
-      // Create a model with an empty value; Yjs will populate it after `doc-init`.
       const model = monacoInstance.editor.createModel('', "typescript", monacoInstance.Uri.file('App.tsx'));
       editorInstance.setModel(model);
       console.log('🔧 Created TypeScript model with .tsx URI for proper TSX support');
     } else {
-      // For other languages, just set the language
-      const currentLanguage = SUPPORTED_LANGUAGES[selectedLanguage]?.monacoLanguage || 'javascript';
-      const model = editorInstance.getModel();
-      if (model) {
-        monacoInstance.editor.setModelLanguage(model, currentLanguage);
-        console.log(`🔧 Set model language to ${currentLanguage}`);
+      // Configure language-specific services FIRST (ensures language is registered before model creation)
+      configureLanguageService(selectedLanguage);
+      
+      // For Java/Python/HTML/JavaScript: create model with proper URI and configure language services
+      const modelUri = monacoInstance.Uri.file(`file${extension}`);
+      const model = monacoInstance.editor.createModel('', monacoLanguage, modelUri);
+
+      // Verify language is set correctly (Monaco should recognize built-in languages)
+      if (model.getLanguageId() !== monacoLanguage) {
+        console.warn(`⚠️ Model language mismatch on mount: expected ${monacoLanguage}, got ${model.getLanguageId()}`);
+        monacoInstance.editor.setModelLanguage(model, monacoLanguage);
       }
 
-      // PREVIOUS IMPLEMENTATION (commented out):
-      // - Set the editor value from local `content` state on mount.
-      //
-      // Reason for change:
-      // - Yjs is the source of truth; we avoid writing local state into Monaco to prevent overwriting persisted doc state.
-      //
-      // if (content) {
-      //   console.log('📝 Setting initial content from state');
-      //   editorInstance.setValue(content);
-      //   lastSavedContent.current = content;
-      // } else {
-      //   console.log('📝 No initial content, editor is empty');
-      // }
-      console.log('📝 Waiting for Yjs doc-init to populate editor');
+      editorInstance.setModel(model);
+      console.log(`🔧 Created ${monacoLanguage} model with ${extension} URI (language ID: ${model.getLanguageId()})`);
     }
 
     editorReadyRef.current = true;
@@ -1783,10 +2285,25 @@ const CodeEditor: React.FC = () => {
 
           <Button
             color="inherit"
-            onClick={() => setShowTemplateSelector(!showTemplateSelector)}
+            onClick={() => {
+              const newState = !showTemplateSelector;
+              console.log('🔘 Templates button clicked!');
+              console.log('  Current language:', selectedLanguage);
+              console.log('  Current showTemplateSelector:', showTemplateSelector);
+              console.log('  Setting showTemplateSelector to:', newState);
+              setShowTemplateSelector(newState);
+              // Also log after a tiny delay to see if state updates
+              setTimeout(() => {
+                console.log('  After click - showTemplateSelector should be:', newState);
+              }, 100);
+            }}
             variant={showTemplateSelector ? "contained" : "text"}
+            sx={{ 
+              border: '2px solid red', // Make it very visible for debugging
+              fontWeight: 'bold'
+            }}
           >
-            Templates
+            📝 TEMPLATES
           </Button>
 
           <Button
@@ -1795,6 +2312,28 @@ const CodeEditor: React.FC = () => {
           >
             Chat
           </Button>
+
+          {/* Live Preview button - only show for frontend languages */}
+          {(selectedLanguage === 'html' || selectedLanguage === 'tsx' || selectedLanguage === 'javascript' || selectedLanguage === 'typescript') && (
+            <Button
+              color="inherit"
+              onClick={() => setIsPreviewOpen(!isPreviewOpen)}
+              variant={isPreviewOpen ? "contained" : "text"}
+            >
+              👁️ Preview
+            </Button>
+          )}
+
+          {/* Code Execution button - only show for backend languages */}
+          {(selectedLanguage === 'java' || selectedLanguage === 'python') && (
+            <Button
+              color="inherit"
+              onClick={() => setIsExecutionPanelOpen(!isExecutionPanelOpen)}
+              variant={isExecutionPanelOpen ? "contained" : "text"}
+            >
+              ▶️ Run
+            </Button>
+          )}
         </Toolbar>
       </AppBar>
 
@@ -1809,6 +2348,37 @@ const CodeEditor: React.FC = () => {
           height="100%"
           language={SUPPORTED_LANGUAGES[selectedLanguage]?.monacoLanguage || 'javascript'}
           theme="vs-dark"
+          beforeMount={(monaco) => {
+            // Ensure Java and Python languages are available before editor mounts
+            // This ensures syntax highlighting works correctly
+            const availableLanguages = monaco.languages.getLanguages().map(l => l.id);
+            console.log('📋 Available Monaco languages:', availableLanguages);
+
+            // Verify Java, Python, and HTML are available (they should be built-in)
+            if (!availableLanguages.includes('java')) {
+              console.warn('⚠️ Java language not found in Monaco build');
+            }
+            if (!availableLanguages.includes('python')) {
+              console.warn('⚠️ Python language not found in Monaco build');
+            }
+            if (!availableLanguages.includes('html')) {
+              console.warn('⚠️ HTML language not found in Monaco build');
+            }
+
+            // Pre-configure language services for Java/Python/HTML if they're available
+            if (availableLanguages.includes('java') || availableLanguages.includes('python') || availableLanguages.includes('html')) {
+              // Configure languages early to ensure they're ready when editor mounts
+              if (availableLanguages.includes('java')) {
+                configureLanguageService('java');
+              }
+              if (availableLanguages.includes('python')) {
+                configureLanguageService('python');
+              }
+              if (availableLanguages.includes('html')) {
+                configureLanguageService('html');
+              }
+            }
+          }}
           onMount={handleEditorDidMount}
           options={{
             minimap: { enabled: true, side: 'right' },
@@ -1838,6 +2408,26 @@ const CodeEditor: React.FC = () => {
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
       />
+
+      {/* Live Preview Component */}
+      <LivePreview
+        code={content}
+        language={selectedLanguage as 'html' | 'tsx' | 'javascript' | 'typescript'}
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+      />
+
+      {/* Code Execution Panel */}
+      {(selectedLanguage === 'java' || selectedLanguage === 'python') && (
+        <ExecutionPanel
+          code={content}
+          language={selectedLanguage as 'java' | 'python'}
+          documentId={id || ''}
+          socket={socketRef.current}
+          isOpen={isExecutionPanelOpen}
+          onClose={() => setIsExecutionPanelOpen(false)}
+        />
+      )}
 
       {/* Template Selector */}
       {showTemplateSelector && (
@@ -1881,10 +2471,34 @@ const CodeEditor: React.FC = () => {
             </Box>
 
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
-              {Object.entries(CODE_TEMPLATES)
-                .filter(([key, template]) =>
-                  !template.languages || template.languages.includes(selectedLanguage)
-                )
+              {(() => {
+                const allTemplates = Object.entries(CODE_TEMPLATES);
+                const filtered = allTemplates.filter(([key, template]) => {
+                  // Show template if:
+                  // 1. It has no language restriction (universal templates like 'blank')
+                  // 2. OR it supports the currently selected language
+                  const shouldShow = !template.languages || template.languages.includes(selectedLanguage);
+                  if (!shouldShow) {
+                    console.log(`  ❌ Filtered out: ${key} (languages: ${JSON.stringify(template.languages)}, selected: ${selectedLanguage})`);
+                  }
+                  return shouldShow;
+                });
+                
+                // Debug logging
+                console.log(`🔍 Template Filter Debug:`);
+                console.log(`  Selected Language: "${selectedLanguage}"`);
+                console.log(`  Total Templates: ${allTemplates.length}`);
+                console.log(`  Filtered Templates (${filtered.length}):`, filtered.map(([k, t]) => `${k} (${t.name})`));
+                console.log(`  All Template Keys:`, allTemplates.map(([k]) => k));
+                
+                // Show Java/Python templates specifically
+                const javaTemplates = allTemplates.filter(([k, t]) => t.languages?.includes('java'));
+                const pythonTemplates = allTemplates.filter(([k, t]) => t.languages?.includes('python'));
+                console.log(`  ☕ Java Templates Found:`, javaTemplates.map(([k]) => k));
+                console.log(`  🐍 Python Templates Found:`, pythonTemplates.map(([k]) => k));
+                
+                return filtered;
+              })()
                 .map(([key, template]) => (
                   <Paper
                     key={key}

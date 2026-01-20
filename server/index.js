@@ -25,6 +25,8 @@ import { listDocumentsForUser, createDocumentForUser, validateLinkToken, rotateS
 import { listFoldersForUser, createFolderForUser } from './db/folders.js';
 import { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } from './db/updates.js';
 import { downloadSnapshotBytes, uploadSnapshot } from './r2/snapshots.js';
+import { validateCode } from './execution/executor.js';
+import { executionQueue } from './execution/queue.js';
 
 /*
 PREVIOUS IMPLEMENTATION (commented out):
@@ -560,6 +562,87 @@ app.post('/api/documents', requireClerkAuth, async (req, res) => {
   res.json(doc);
 });
 
+// Code execution endpoint
+app.post('/api/execute', requireClerkAuth, async (req, res) => {
+  const { documentId, language, code } = req.body || {};
+
+  // Validate input
+  if (!language || !code) {
+    return res.status(400).json({ error: 'Language and code are required' });
+  }
+
+  if (!['python', 'java'].includes(language)) {
+    return res.status(400).json({ error: `Language ${language} is not supported for server-side execution` });
+  }
+
+  try {
+    // Security: Validate code before execution
+    validateCode(code, language);
+
+    // Queue execution with user ID for rate limiting
+    // Note: Don't pass executor function - worker will look it up by language
+    const result = await executionQueue.enqueue({
+      code,
+      language,
+      options: {
+        timeout: 10000, // 10 seconds
+      },
+    }, req.user.id);
+
+    // Emit result via WebSocket to all clients viewing this document
+    if (documentId) {
+      io.to(documentId).emit('code-execution-result', {
+        documentId,
+        userId: req.user.id,
+        language,
+        ...result,
+      });
+    }
+
+    res.json({
+      executionId: result.executionId,
+      status: result.status,
+      output: result.output,
+      error: result.error,
+      executionTimeMs: result.executionTimeMs,
+    });
+  } catch (error) {
+    // CRITICAL: Catch ALL errors to prevent server crash
+    // Log error but don't let it propagate and crash the server
+    console.error('[API] Execution error:', error);
+    console.error('[API] Error stack:', error.stack);
+
+    // Emit error via WebSocket if documentId exists (don't let WS errors crash server)
+    if (documentId) {
+      try {
+        io.to(documentId).emit('code-execution-result', {
+          documentId,
+          userId: req.user.id,
+          language,
+          status: 'failed',
+          error: error.message || 'Execution failed',
+          executionId: null,
+        });
+      } catch (wsError) {
+        console.error('[API] Failed to emit WebSocket error (non-fatal):', wsError.message);
+        // Don't throw - we still need to send HTTP response
+      }
+    }
+
+    // Always send a valid JSON response - never let the request hang
+    const statusCode = error.message?.includes('Rate limit') ? 429 : 400;
+
+    // Ensure response hasn't been sent already
+    if (!res.headersSent) {
+      res.status(statusCode).json({
+        error: error.message || 'Execution failed',
+        executionId: null,
+        status: 'failed',
+      });
+    }
+  }
+});
+
 app.post('/api/documents/:id/share-link', requireClerkAuth, async (req, res) => {
   const { id } = req.params;
   const mode = req.body?.mode === 'edit' ? 'edit' : 'view';
@@ -612,6 +695,19 @@ app.get('/health', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
+
+// CRITICAL: Prevent unhandled errors from crashing the server
+// This ensures WebSocket connections and other requests stay alive
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Server] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit - log and continue
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Server] Uncaught Exception:', error);
+  // Don't exit - log and continue
+  // In production, you might want to exit here, but for development, continue
+});
 
 (async () => {
   // PREVIOUS IMPLEMENTATION (commented out):
