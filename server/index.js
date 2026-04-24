@@ -7,17 +7,37 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Parse FRONTEND_URL as a comma-separated allowlist so both local dev
+// (http://localhost:3000) and the Vercel production domain can be set
+// via a single env var: FRONTEND_URL=https://myapp.vercel.app,http://localhost:3000
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST']
-  }
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+  },
 });
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // No origin = same-origin request, curl, health-check pings — allow.
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin '${origin}' not in allowlist`));
+    },
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: '1mb' }));
+
+// Phase 8: AI assistant routes
+app.use('/api/ai', aiRouter);
 
 import { migrate } from './db/migrate.js';
 import { requireClerkAuth, socketClerkAuth } from './auth/middleware.js';
@@ -27,6 +47,7 @@ import { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } from 
 import { downloadSnapshotBytes, uploadSnapshot } from './r2/snapshots.js';
 import { validateCode } from './execution/executor.js';
 import { executionQueue } from './execution/queue.js';
+import aiRouter from './ai.js';
 
 /*
 PREVIOUS IMPLEMENTATION (commented out):
@@ -278,14 +299,27 @@ io.on('connection', (socket) => {
       });
 
       const room = io.sockets.adapter.rooms.get(documentId);
-      const activeUsers = Array.from(room || []).map((socketId) => ({
-        userId: socketId,
-        userName: `User ${socketId.slice(0, 6)}`,
-      }));
+      // CRITICAL: Map socket IDs to Clerk user IDs for proper matching with awareness states
+      const activeUsers = Array.from(room || [])
+        .map((socketId) => {
+          const socket = io.sockets.sockets.get(socketId);
+          const user = socket?.data?.user;
+          // Use Clerk user ID if available, otherwise fall back to socket ID
+          return {
+            userId: user?.clerkUserId || user?.id || socketId,
+            socketId: socketId, // Keep socket ID for reference
+            userName: user?.name || `User ${socketId.slice(0, 6)}`,
+          };
+        })
+        .filter((u) => u.userId); // Only include users with valid IDs
 
+      // CRITICAL: Send Clerk user ID instead of socket ID for proper matching with awareness states
+      // Reuse the existing `user` variable declared on line 224
+      const userId = user?.clerkUserId || user?.id || socket.id;
       socket.to(documentId).emit('user-joined', {
-        userId: socket.id,
-        userName: `User ${socket.id.slice(0, 6)}`,
+        userId: userId,
+        socketId: socket.id, // Keep socket ID for reference
+        userName: user?.name || `User ${socket.id.slice(0, 6)}`,
         timestamp: Date.now(),
       });
       safeEmit('active-users', activeUsers);
@@ -552,9 +586,13 @@ io.on('connection', (socket) => {
       console.log(`Room ${documentId} now has ${clientCount} clients`);
 
       // Notify other users about user leaving
+      // CRITICAL: Send Clerk user ID instead of socket ID for proper matching with awareness states
+      const user = socket.data?.user;
+      const userId = user?.clerkUserId || user?.id || socket.id;
       socket.to(documentId).emit('user-left', {
-        userId: socket.id,
-        userName: `User ${socket.id.slice(0, 6)}`,
+        userId: userId,
+        socketId: socket.id, // Keep socket ID for reference
+        userName: user?.name || `User ${socket.id.slice(0, 6)}`,
         timestamp: Date.now()
       });
     } catch (error) {
@@ -566,10 +604,19 @@ io.on('connection', (socket) => {
     try {
       const room = io.sockets.adapter.rooms.get(documentId);
       if (room) {
-        const activeUsers = Array.from(room).map(socketId => ({
-          userId: socketId,
-          userName: `User ${socketId.slice(0, 6)}`
-        }));
+        // CRITICAL: Map socket IDs to Clerk user IDs for proper matching with awareness states
+        const activeUsers = Array.from(room)
+          .map((socketId) => {
+            const socketInstance = io.sockets.sockets.get(socketId);
+            const user = socketInstance?.data?.user;
+            // Use Clerk user ID if available, otherwise fall back to socket ID
+            return {
+              userId: user?.clerkUserId || user?.id || socketId,
+              socketId: socketId, // Keep socket ID for reference
+              userName: user?.name || `User ${socketId.slice(0, 6)}`,
+            };
+          })
+          .filter((u) => u.userId); // Only include users with valid IDs
         console.log(`Sending active users for document ${documentId}:`, activeUsers);
         safeEmit('active-users', activeUsers);
       } else {

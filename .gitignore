@@ -4,6 +4,8 @@ server/node_modules/
 .pnpm-store/
 
 public/
+archives/
+docs/
 
 # Build outputs
 dist/
