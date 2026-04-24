@@ -1,7 +1,7 @@
 // import React from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Code2, Users, Terminal, GitBranch, Play, ArrowRight, Braces, Sparkles } from "lucide-react";
+import { Code2, Users, Terminal, Play, ArrowRight, Braces, Sparkles } from "lucide-react";
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";

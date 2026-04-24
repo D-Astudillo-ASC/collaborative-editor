@@ -10,10 +10,7 @@ import {
   Typography,
   List,
   ListItem,
-  ListItemText,
-  ListItemAvatar,
   Avatar,
-  Divider,
   Chip,
   Fade,
   Zoom
@@ -55,7 +52,7 @@ const Chat: React.FC<ChatProps> = ({ isOpen, onClose }) => {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
@@ -271,7 +268,7 @@ const Chat: React.FC<ChatProps> = ({ isOpen, onClose }) => {
             </Box>
           ) : (
             <List sx={{ p: 0 }}>
-              {messages.map((message, index) => (
+              {messages.map((message) => (
                 <ListItem
                   key={message.id}
                   sx={{

@@ -1,6 +1,6 @@
 import { Link, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Terminal, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { SignIn, useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';

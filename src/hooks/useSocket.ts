@@ -19,7 +19,7 @@ interface SocketEvents {
 export function useSocket(options: UseSocketOptions = {}) {
   const { autoConnect = true } = options;
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  const [error, setError] = useState<Error | null>(null);
+  const [error] = useState<Error | null>(null);
   const listenersRef = useRef<Map<string, Set<(...args: any[]) => void>>>(new Map());
 
   const connect = useCallback(() => {

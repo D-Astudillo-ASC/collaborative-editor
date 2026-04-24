@@ -1,16 +1,13 @@
-import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Server,
   Cloud,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   Code2,
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { TemplateCategory } from '@/types/execution';
 
 interface BackendRequiredPanelProps {

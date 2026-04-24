@@ -20,7 +20,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { languageConfigs, languages } from '@/constants/languages';
-import { getTemplatesByLanguage, getTemplateCategories } from '@/constants/templates';
+import { getTemplatesByLanguage } from '@/constants/templates';
 import type { Language } from '@/types';
 
 interface NewDocumentModalProps {

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Eye, Terminal, Server, FileCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import { LivePreviewPanel } from './LivePreviewPanel';

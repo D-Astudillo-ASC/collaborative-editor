@@ -59,7 +59,7 @@ export function useUnifiedExecution({
   const strategy = resolveExecutionStrategy(language, category);
 
   // Live Preview hook
-  const { preview, updatePreview, iframeRef } = useLivePreview({ language });
+  const { preview, updatePreview } = useLivePreview({ language });
 
   // Browser Console hook
   const {

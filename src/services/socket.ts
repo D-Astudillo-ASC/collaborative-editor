@@ -61,7 +61,7 @@ export function getSocket(token: string | null): Socket {
     });
   } else {
     // Update auth token if it changed
-    if (socket.auth && socket.auth.token !== token) {
+    if (socket.auth && (socket.auth as Record<string, unknown>).token !== token) {
       console.log('[socket.ts] Updating socket auth token');
     socket.auth = { token };
     }
