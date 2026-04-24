@@ -1,0 +1,590 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+/* Collaborative Code Editor - Design System
+   Primary: Indigo #6366f1
+   Background: VS Code Dark #1e1e1e
+   Typography: Inter (UI), JetBrains Mono (code)
+*/
+
+/* Tailwind v4 theme configuration - migrated from v3 config */
+@theme {
+    /* Colors - using CSS variables */
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+
+    /* Primary colors */
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+
+    /* Secondary colors */
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+    /* Destructive colors */
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+    /* Muted colors */
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+
+    /* Accent colors */
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
+
+    /* Popover colors */
+    --color-popover: hsl(var(--popover));
+    --color-popover-foreground: hsl(var(--popover-foreground));
+
+    /* Card colors */
+    --color-card: hsl(var(--card));
+    --color-card-foreground: hsl(var(--card-foreground));
+
+    /* Status colors */
+    --color-success: hsl(var(--success));
+    --color-success-foreground: hsl(var(--success-foreground));
+    --color-warning: hsl(var(--warning));
+    --color-warning-foreground: hsl(var(--warning-foreground));
+    --color-info: hsl(var(--info));
+    --color-info-foreground: hsl(var(--info-foreground));
+
+    /* Sidebar colors */
+    --color-sidebar: hsl(var(--sidebar-background));
+    --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+    --color-sidebar-primary: hsl(var(--sidebar-primary));
+    --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+    --color-sidebar-accent: hsl(var(--sidebar-accent));
+    --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+    --color-sidebar-border: hsl(var(--sidebar-border));
+    --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+    /* Editor colors */
+    --color-editor-bg: hsl(var(--editor-bg));
+    --color-editor-line-number: hsl(var(--editor-line-number));
+    --color-editor-selection: hsl(var(--editor-selection));
+    --color-editor-cursor: hsl(var(--editor-cursor));
+
+    /* Border radius */
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+
+    /* Font families */
+    --font-family-sans: Inter, system-ui, sans-serif;
+    --font-family-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+    /* Container */
+    --container-center: true;
+    --container-padding: 2rem;
+    --container-screen-2xl: 1400px;
+
+    /* Backdrop blur */
+    --backdrop-blur-xs: 2px;
+
+    /* Animations */
+    --animate-accordion-down: accordion-down 0.2s ease-out;
+    --animate-accordion-up: accordion-up 0.2s ease-out;
+    --animate-fade-in: fade-in 0.2s ease-out;
+    --animate-fade-out: fade-out 0.2s ease-out;
+    --animate-slide-in-right: slide-in-right 0.3s ease-out;
+    --animate-slide-out-right: slide-out-right 0.3s ease-out;
+    --animate-scale-in: scale-in 0.2s ease-out;
+    --animate-shimmer: shimmer 2s infinite;
+    --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@layer base {
+    :root {
+        /* Core colors */
+        --background: 0 0% 100%;
+        --foreground: 240 10% 3.9%;
+
+        /* Surface colors */
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 10% 3.9%;
+
+        /* Brand colors */
+        --primary: 239 84% 67%;
+        --primary-foreground: 0 0% 100%;
+
+        /* Secondary & Muted */
+        --secondary: 240 4.8% 95.9%;
+        --secondary-foreground: 240 5.9% 10%;
+        --muted: 240 4.8% 95.9%;
+        --muted-foreground: 240 3.8% 46.1%;
+
+        /* Accent */
+        --accent: 239 84% 67%;
+        --accent-foreground: 0 0% 100%;
+
+        /* Destructive */
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 100%;
+
+        /* Status colors */
+        --success: 160 84% 39%;
+        --success-foreground: 0 0% 100%;
+        --warning: 38 92% 50%;
+        --warning-foreground: 0 0% 0%;
+        --info: 217 91% 60%;
+        --info-foreground: 0 0% 100%;
+
+        /* Borders & inputs */
+        --border: 240 5.9% 90%;
+        --input: 240 5.9% 90%;
+        --ring: 239 84% 67%;
+
+        /* Radius */
+        --radius: 0.5rem;
+
+        /* Editor specific */
+        --editor-bg: 0 0% 100%;
+        --editor-line-number: 240 3.8% 46.1%;
+        --editor-selection: 239 84% 67% / 0.2;
+        --editor-cursor: 239 84% 67%;
+
+        /* Sidebar */
+        --sidebar-background: 0 0% 98%;
+        --sidebar-foreground: 240 5.3% 26.1%;
+        --sidebar-primary: 239 84% 67%;
+        --sidebar-primary-foreground: 0 0% 100%;
+        --sidebar-accent: 240 4.8% 95.9%;
+        --sidebar-accent-foreground: 240 5.9% 10%;
+        --sidebar-border: 220 13% 91%;
+        --sidebar-ring: 239 84% 67%;
+
+        /* Glass effect */
+        --glass-bg: 0 0% 100% / 0.8;
+        --glass-border: 0 0% 100% / 0.2;
+    }
+
+    .dark {
+        /* Core colors - VS Code inspired dark */
+        --background: 0 0% 12%;
+        --foreground: 0 0% 100%;
+
+        /* Surface colors */
+        --card: 0 0% 14.5%;
+        --card-foreground: 0 0% 100%;
+        --popover: 0 0% 14.5%;
+        --popover-foreground: 0 0% 100%;
+
+        /* Brand colors */
+        --primary: 239 84% 67%;
+        --primary-foreground: 0 0% 100%;
+
+        /* Secondary & Muted */
+        --secondary: 0 0% 17.5%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 0 0% 17.5%;
+        --muted-foreground: 0 0% 80%;
+
+        /* Accent */
+        --accent: 239 84% 67%;
+        --accent-foreground: 0 0% 100%;
+
+        /* Destructive */
+        --destructive: 0 62.8% 50%;
+        --destructive-foreground: 0 0% 100%;
+
+        /* Status colors */
+        --success: 160 84% 39%;
+        --success-foreground: 0 0% 100%;
+        --warning: 38 92% 50%;
+        --warning-foreground: 0 0% 0%;
+        --info: 217 91% 60%;
+        --info-foreground: 0 0% 100%;
+
+        /* Borders & inputs */
+        --border: 0 0% 20%;
+        --input: 0 0% 20%;
+        --ring: 239 84% 67%;
+
+        /* Editor specific */
+        --editor-bg: 0 0% 12%;
+        --editor-line-number: 0 0% 50%;
+        --editor-selection: 239 84% 67% / 0.3;
+        --editor-cursor: 239 84% 67%;
+
+        /* Sidebar */
+        --sidebar-background: 0 0% 10%;
+        --sidebar-foreground: 0 0% 90%;
+        --sidebar-primary: 239 84% 67%;
+        --sidebar-primary-foreground: 0 0% 100%;
+        --sidebar-accent: 0 0% 15%;
+        --sidebar-accent-foreground: 0 0% 100%;
+        --sidebar-border: 0 0% 18%;
+        --sidebar-ring: 239 84% 67%;
+
+        /* Glass effect */
+        --glass-bg: 0 0% 12% / 0.8;
+        --glass-border: 0 0% 100% / 0.1;
+    }
+}
+
+@layer base {
+    * {
+        border-color: hsl(var(--border));
+    }
+
+    body {
+        @apply antialiased;
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+        font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    /* Smooth theme transitions */
+    *,
+    *::before,
+    *::after {
+        transition:
+            background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+            border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+            color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+            fill 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+            stroke 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+            box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Disable transitions during theme switch to prevent flicker */
+    .theme-transitioning *,
+    .theme-transitioning *::before,
+    .theme-transitioning *::after {
+        transition: none !important;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        @apply bg-transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        @apply rounded-full;
+        background-color: hsl(var(--muted-foreground) / 0.2);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: hsl(var(--muted-foreground) / 0.4);
+    }
+
+    /* Code/mono text */
+    .font-mono,
+    code,
+    pre {
+        font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+}
+
+/* Keyframes for animations */
+@keyframes accordion-down {
+    from {
+        height: 0;
+    }
+
+    to {
+        height: var(--radix-accordion-content-height);
+    }
+}
+
+@keyframes accordion-up {
+    from {
+        height: var(--radix-accordion-content-height);
+    }
+
+    to {
+        height: 0;
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-out {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
+@keyframes slide-in-right {
+    from {
+        transform: translateX(100%);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+@keyframes slide-out-right {
+    from {
+        transform: translateX(0);
+    }
+
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes shimmer {
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@layer components {
+
+    /* Glassmorphism effect */
+    .glass {
+        @apply backdrop-blur-xl border;
+        background: hsl(var(--glass-bg));
+        border-color: hsl(var(--glass-border));
+    }
+
+    /* Gradient button */
+    .btn-gradient {
+        @apply bg-gradient-to-r;
+        background-image: linear-gradient(to right, hsl(var(--primary)), hsl(var(--accent)));
+        color: hsl(var(--primary-foreground));
+        background-size: 200% 100%;
+        transition: background-position 0.3s ease;
+    }
+
+    .btn-gradient:hover {
+        background-position: 100% 0;
+    }
+
+    /* Status indicators */
+    .status-connected {
+        background-color: hsl(var(--success));
+    }
+
+    .status-syncing {
+        background-color: hsl(var(--warning));
+    }
+
+    .status-disconnected {
+        background-color: hsl(var(--destructive));
+    }
+
+    /* Pulse animation for syncing */
+    .pulse-sync {
+        animation: pulse-sync 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes pulse-sync {
+
+        0%,
+        100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: 0.5;
+        }
+    }
+
+    /* Editor container */
+    .editor-container {
+        @apply rounded-lg overflow-hidden border;
+        border-color: hsl(var(--border));
+        background: hsl(var(--editor-bg));
+    }
+
+    /* Avatar stack */
+    .avatar-stack>* {
+        @apply -ml-2 first:ml-0 ring-2;
+        --tw-ring-color: hsl(var(--background));
+    }
+
+    /* Cursor label */
+    .cursor-label {
+        @apply px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap;
+        animation: fade-in 0.2s ease;
+    }
+}
+
+@layer utilities {
+
+    /* Text gradient */
+    .text-gradient {
+        @apply bg-clip-text text-transparent bg-gradient-to-r;
+        background-image: linear-gradient(to right, hsl(var(--primary)), hsl(var(--accent)));
+    }
+
+    /* Smooth transitions */
+    .transition-smooth {
+        @apply transition-all duration-300 ease-out;
+    }
+
+    /* No scrollbar utility */
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+}
+
+/* Theme transition shimmer overlay */
+.theme-transitioning {
+    overflow: hidden;
+}
+
+.theme-transitioning::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(45deg,
+            transparent 30%,
+            rgba(255, 255, 255, 0.08) 50%,
+            transparent 70%);
+    transform: translateX(-100%);
+    animation: theme-shimmer 0.6s ease-out forwards;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+@keyframes theme-shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* Clerk Component Customization */
+/* Layout and structural styles - not handled by appearance API */
+.clerk-sign-in-wrapper {
+    @apply w-full;
+}
+
+.clerk-sign-in-wrapper [data-clerk-element="rootBox"] {
+    @apply w-full;
+}
+
+.clerk-sign-in-wrapper [data-clerk-element="card"] {
+    @apply shadow-none border-0 bg-transparent p-0;
+}
+
+/* Hide Clerk's default titles - not handled by appearance API */
+.clerk-sign-in-wrapper [data-clerk-element="headerTitle"] {
+    @apply hidden;
+}
+
+.clerk-sign-in-wrapper [data-clerk-element="headerSubtitle"] {
+    @apply hidden;
+}
+
+/* Social button layout - colors handled by appearance API */
+.clerk-sign-in-wrapper [data-clerk-element="socialButtonsBlockButton"] {
+    @apply w-full border transition-colors rounded-md;
+}
+
+/* Fallback for text color if appearance API doesn't fully apply */
+.clerk-sign-in-wrapper [data-clerk-element="socialButtonsBlockButton"] *,
+.clerk-sign-in-wrapper [data-clerk-element="socialButtonsBlockButton"] span,
+.clerk-sign-in-wrapper [data-clerk-element="socialButtonsBlockButtonText"] {
+    color: hsl(var(--foreground)) !important;
+}
+
+/* Placeholder styling - not fully supported in appearance API */
+.clerk-sign-in-wrapper [data-clerk-element="formFieldInput"]::placeholder {
+    color: hsl(var(--muted-foreground));
+}
+
+/* Hide ItemText in SelectItem dropdown - wrap it in hidden div */
+[data-radix-select-item]>div[style*="display: none"] {
+    display: none !important;
+}
+
+/* Hide any span with aria-hidden that's a direct child (ItemText) - backup */
+[data-radix-select-item]>span[aria-hidden="true"]:not([class*="absolute"]):not([class*="flex"]) {
+    display: none !important;
+    position: absolute !important;
+    left: -9999px !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+}
+
+/* Also target by Radix's id pattern */
+[data-radix-select-item]>span[id^="radix-_r_"]:not([class*="absolute"]):not([class*="flex"]) {
+    display: none !important;
+}
+
+/* Resizable panels: only non-visual, non-layout properties here.
+   All sizing, colors, and cursors are handled in resizable.tsx via Tailwind. */
+[data-separator] {
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    /* Must sit above Monaco editor scrollbars (z-index ~3) and panel content */
+    z-index: 50;
+    position: relative;
+}
+
+[data-separator] > * {
+    pointer-events: none;
+}

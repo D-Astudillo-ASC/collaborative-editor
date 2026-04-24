@@ -58,7 +58,7 @@ const Login: React.FC = () => {
                 Reason for change:
                 - Explicit post-auth redirect prevents / <-> /login bouncing in some router setups. */}
             {isLoaded ? (
-              <SignIn routing="path" path="/login" afterSignInUrl="/" afterSignUpUrl="/" />
+              <SignIn routing="path" path="/login" fallbackRedirectUrl="/" forceRedirectUrl="/" />
             ) : null}
           </Box>
         </Paper>

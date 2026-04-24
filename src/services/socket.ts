@@ -33,7 +33,10 @@ const SOCKET_URL = SOCKET_BASE_URL || 'http://localhost:5000';
 let socket: Socket | null = null;
 
 export function getSocket(token: string | null): Socket {
+  // Reuse existing socket if it exists and token matches (like old CodeEditor)
+  // Each browser tab/window has its own JS context, so singleton is fine per tab
   if (!socket) {
+    console.log('[socket.ts] Creating new socket instance', { hasToken: !!token });
     socket = io(SOCKET_URL, {
       autoConnect: false,
       auth: { token },
@@ -43,12 +46,25 @@ export function getSocket(token: string | null): Socket {
       reconnectionDelayMax: 5000,
       timeout: 20000,
       transports: ['websocket', 'polling'],
-      forceNew: false,
+      forceNew: false, // Keep false - each browser tab/window has its own JS context
       upgrade: true,
       rememberUpgrade: true,
     });
+    
+    // Add connection logging
+    socket.on('connect', () => {
+      console.log('[socket.ts] Socket connected', { socketId: socket?.id });
+    });
+    
+    socket.on('disconnect', (reason) => {
+      console.log('[socket.ts] Socket disconnected', { reason });
+    });
   } else {
+    // Update auth token if it changed
+    if (socket.auth && socket.auth.token !== token) {
+      console.log('[socket.ts] Updating socket auth token');
     socket.auth = { token };
+    }
   }
   return socket;
 }

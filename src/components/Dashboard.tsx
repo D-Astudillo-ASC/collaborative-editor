@@ -22,9 +22,9 @@ import {
   MenuItem,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import { useAuth } from '../contexts/AuthContext';
-import { CODE_TEMPLATES, type CodeTemplateKey } from '../templates/codeTemplates';
-import { apiUrl } from '../config/backend';
+import { useAuth } from '@/contexts/AuthContext';
+import { CODE_TEMPLATES, type CodeTemplateKey } from '@/templates/codeTemplates';
+import { apiUrl } from '@/config/backend';
 
 interface Document {
   id: string;
@@ -90,18 +90,18 @@ const Dashboard: React.FC = () => {
     if (!template) {
       return 'tsx'; // Default
     }
-    
+
     const languages = template.languages;
     if (!languages) {
       return 'tsx'; // Default
     }
-    
+
     // Convert readonly array to regular array to check length
     const langArray = [...languages];
     if (langArray.length === 0) {
       return 'tsx'; // Default
     }
-    
+
     // Prefer language-specific templates
     // Map template keys to their primary language
     const templateToLanguage: Record<string, string> = {
@@ -124,12 +124,12 @@ const Dashboard: React.FC = () => {
       testFile: 'typescript',
       htmlTemplate: 'html', // HTML template maps to HTML language
     };
-    
+
     // Check if template has a specific language mapping
     if (templateToLanguage[templateKey]) {
       return templateToLanguage[templateKey];
     }
-    
+
     // Otherwise, use the first language from the template's languages array
     // Type assertion needed because template.languages is readonly array
     const firstLang = template.languages[0];
@@ -143,10 +143,10 @@ const Dashboard: React.FC = () => {
       const token = await getAccessToken();
       if (!token) return;
       const template = CODE_TEMPLATES[selectedTemplate];
-      
+
       // Determine the language from the selected template
       const language = getLanguageFromTemplate(selectedTemplate);
-      
+
       const response = await fetch(apiUrl('/api/documents'), {
         method: 'POST',
         headers: {
