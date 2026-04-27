@@ -64,9 +64,14 @@ async function migrate() {
     await ensureMigrationsTable(client);
     const applied = await getAppliedMigrationIds(client);
     const migrations = listSqlMigrations(migrationsDir);
+    const pending = migrations.filter((file) => !applied.has(file));
 
-    for (const file of migrations) {
-      if (applied.has(file)) continue;
+    if (pending.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log('✅ No pending migrations (database is up to date).');
+    }
+
+    for (const file of pending) {
       const fullPath = path.join(migrationsDir, file);
       const sql = fs.readFileSync(fullPath, 'utf8');
       // eslint-disable-next-line no-console

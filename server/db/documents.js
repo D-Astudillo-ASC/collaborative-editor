@@ -1,6 +1,22 @@
 import crypto from 'crypto';
 import { getPool } from './pool.js';
 
+const ALLOWED_EDITOR_LANGUAGES = new Set([
+  'javascript',
+  'typescript',
+  'typescriptreact',
+  'java',
+  'python',
+  'html',
+]);
+
+function normalizeEditorLanguage(value) {
+  if (typeof value !== 'string' || !ALLOWED_EDITOR_LANGUAGES.has(value)) {
+    return 'typescript';
+  }
+  return value;
+}
+
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -31,18 +47,19 @@ async function listDocumentsForUser(userId) {
   return res.rows;
 }
 
-async function createDocumentForUser({ userId, title, initialUpdateBytes }) {
+async function createDocumentForUser({ userId, title, initialUpdateBytes, editorLanguage }) {
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query('begin;');
+    const lang = normalizeEditorLanguage(editorLanguage);
     const docRes = await client.query(
       `
-        insert into documents (title, owner_user_id, share_status)
-        values ($1, $2, 'private')
+        insert into documents (title, owner_user_id, share_status, editor_language)
+        values ($1, $2, 'private', $3)
         returning id, title, updated_at as "lastModified";
       `,
-      [title, userId]
+      [title, userId, lang]
     );
     const doc = docRes.rows[0];
 
@@ -120,6 +137,68 @@ async function validateLinkToken({ documentId, token }) {
   return null;
 }
 
+/**
+ * Metadata for clients that can access the document (member or valid link token).
+ */
+async function getDocumentMetaForAccess({ userId, documentId, linkToken }) {
+  let role = await getMemberRole({ userId, documentId });
+  if (!role) role = await validateLinkToken({ documentId, token: linkToken });
+  if (!role) return null;
+
+  const pool = getPool();
+  const res = await pool.query(
+    `
+      select id,
+             title,
+             coalesce(editor_language, 'typescript') as "editorLanguage"
+      from documents
+      where id = $1
+        and archived_at is null
+      limit 1;
+    `,
+    [documentId]
+  );
+  if (!res.rows.length) return null;
+  return { ...res.rows[0], role };
+}
+
+/**
+ * Title and/or editor language — only owner or editor (not viewer / link-view).
+ */
+async function updateDocumentMeta({ userId, documentId, title, editorLanguage }) {
+  const role = await getMemberRole({ userId, documentId });
+  if (role !== 'owner' && role !== 'editor') {
+    const err = new Error('forbidden');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const sets = [];
+  const vals = [];
+  let n = 1;
+
+  if (typeof title === 'string') {
+    const t = title.trim();
+    if (t.length > 0) {
+      sets.push(`title = $${n++}`);
+      vals.push(t.slice(0, 500));
+    }
+  }
+  if (typeof editorLanguage === 'string' && ALLOWED_EDITOR_LANGUAGES.has(editorLanguage)) {
+    sets.push(`editor_language = $${n++}`);
+    vals.push(editorLanguage);
+  }
+
+  if (sets.length === 0) return;
+
+  const pool = getPool();
+  vals.push(documentId);
+  await pool.query(
+    `update documents set ${sets.join(', ')}, updated_at = now() where id = $${n};`,
+    vals
+  );
+}
+
 async function rotateShareLink({ userId, documentId, mode }) {
   const role = await getMemberRole({ userId, documentId });
   if (role !== 'owner') {
@@ -153,5 +232,7 @@ export {
   getMemberRole,
   validateLinkToken,
   rotateShareLink,
+  getDocumentMetaForAccess,
+  updateDocumentMeta,
 };
 

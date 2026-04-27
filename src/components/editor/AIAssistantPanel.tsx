@@ -10,7 +10,7 @@
  * - Auto-scroll to newest message
  */
 
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, forwardRef, useImperativeHandle, KeyboardEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot,
@@ -22,6 +22,7 @@ import {
   TextSelect,
   Sparkles,
   AlertCircle,
+  ArrowDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -45,6 +46,7 @@ interface AIAssistantPanelProps {
 export interface AIAssistantPanelHandle {
   clearConversation: () => void;
   hasMessages: boolean;
+  focusInput: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,19 +208,68 @@ function AIAssistantPanel({ code, language, selection }, ref) {
 
   const [input, setInput] = useState('');
   const [useSelection, setUseSelection] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [pendingNewCount, setPendingNewCount] = useState(0);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Track the id of the last message so we only count *new* messages — not
+  // every token mutation on the streaming assistant message.
+  const lastMessageIdRef = useRef<string | null>(null);
 
-  // Expose clear + message count so the parent tab bar can show a clear button
   useImperativeHandle(ref, () => ({
     clearConversation,
     hasMessages: messages.length > 0,
+    focusInput: () => textareaRef.current?.focus(),
   }), [clearConversation, messages.length]);
 
-  // Auto-scroll to bottom when new content arrives
-  useEffect(() => {
+  // Track scroll position so streaming pins to bottom only when the user is
+  // already there, instead of fighting them when they scroll up to read.
+  const handleScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < 80;
+    setIsAtBottom(atBottom);
+    if (atBottom) setPendingNewCount(0);
+  }, []);
+
+  // Pin to bottom on new message; while the assistant streams, keep scrolling
+  // only if the user is already at the bottom.
+  useLayoutEffect(() => {
+    const last = messages[messages.length - 1];
+    const lastId = last?.id || null;
+
+    const newMessageArrived = lastId !== null && lastId !== lastMessageIdRef.current;
+    lastMessageIdRef.current = lastId;
+
+    if (newMessageArrived && lastMessageIdRef.current !== null) {
+      // First-ever message → instant jump.
+      if (messages.length === 1) {
+        bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+        return;
+      }
+      if (isAtBottom || last?.role === 'user') {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        // Synchronize external events into local state — same pattern as
+        // ChatPanel; the functional updater form is referentially safe.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setPendingNewCount((c) => c + 1);
+      }
+      return;
+    }
+
+    // Same id, content changed → streaming update. Follow only if at bottom.
+    if (isAtBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [messages, isAtBottom]);
+
+  const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    setPendingNewCount(0);
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -250,7 +301,11 @@ function AIAssistantPanel({ code, language, selection }, ref) {
   const hasSelection = !!selection?.trim();
 
   return (
-    <div className="flex h-full flex-col bg-card">
+    <section
+      className="flex h-full flex-col bg-card"
+      role="region"
+      aria-label="AI Assistant"
+    >
       {/* ------------------------------------------------------------------ */}
       {/* Context indicator                                                    */}
       {/* ------------------------------------------------------------------ */}
@@ -287,7 +342,15 @@ function AIAssistantPanel({ code, language, selection }, ref) {
       {/* ------------------------------------------------------------------ */}
       {/* Messages                                                             */}
       {/* ------------------------------------------------------------------ */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div
+        ref={scrollerRef}
+        onScroll={handleScroll}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="AI assistant messages"
+        className="relative flex-1 overflow-y-auto px-4 py-3"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
@@ -372,6 +435,26 @@ function AIAssistantPanel({ code, language, selection }, ref) {
         )}
 
         <div ref={bottomRef} />
+
+        {/* "Jump to latest" pill — appears when the user has scrolled up and
+            new content has arrived since. Sticks to the bottom of the
+            scroller, not the viewport, so it tracks the panel cleanly. */}
+        <AnimatePresence>
+          {!isAtBottom && pendingNewCount > 0 && (
+            <motion.button
+              key="jump"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.15 }}
+              onClick={scrollToBottom}
+              className="sticky bottom-2 mx-auto flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/15 px-3 py-1 text-xs text-primary backdrop-blur-md hover:bg-primary/20"
+            >
+              <ArrowDown className="h-3 w-3" />
+              {pendingNewCount} new {pendingNewCount === 1 ? 'message' : 'messages'}
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -386,6 +469,7 @@ function AIAssistantPanel({ code, language, selection }, ref) {
             onKeyDown={handleKeyDown}
             placeholder="Ask about your code… (Enter to send)"
             rows={1}
+            aria-label="AI assistant prompt"
             className="flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground/60 focus:outline-none"
             disabled={isStreaming}
           />
@@ -415,7 +499,7 @@ function AIAssistantPanel({ code, language, selection }, ref) {
           Powered by Gemini 2.0 Flash · {language}
         </p>
       </div>
-    </div>
+    </section>
   );
 });
 

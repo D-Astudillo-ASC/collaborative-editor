@@ -92,8 +92,27 @@ export function useAIChat() {
         });
 
         if (!response.ok) {
-          const body = await response.text().catch(() => '');
-          throw new Error(`Server error ${response.status}: ${body}`);
+          // Map common backend errors to user-friendly text. Falls back to a
+          // generic message if the response body isn't JSON or doesn't have
+          // an `error` field.
+          let serverMessage: string | null = null;
+          try {
+            const data = await response.clone().json();
+            if (typeof data?.error === 'string') serverMessage = data.error;
+          } catch {
+            const text = await response.text().catch(() => '');
+            if (text) serverMessage = text;
+          }
+          const friendly = (() => {
+            switch (response.status) {
+              case 401: return 'Please sign in to use the AI assistant.';
+              case 429: return serverMessage || 'You are sending requests too quickly. Please wait a moment.';
+              case 503: return serverMessage || 'AI service is temporarily unavailable.';
+              case 400: return serverMessage || 'Your message could not be processed.';
+              default:  return serverMessage || `AI request failed (HTTP ${response.status}).`;
+            }
+          })();
+          throw new Error(friendly);
         }
 
         // Read SSE stream -------------------------------------------------------

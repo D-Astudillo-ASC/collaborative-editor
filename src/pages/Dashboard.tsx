@@ -132,6 +132,7 @@ const Dashboard = () => {
         },
         body: JSON.stringify({
           title: title.trim(),
+          editorLanguage: language,
           // PREVIOUS IMPLEMENTATION (commented out):
           // - Created a document with just a title (blank Yjs state).
           //

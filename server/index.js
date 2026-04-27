@@ -41,13 +41,30 @@ app.use('/api/ai', aiRouter);
 
 import { migrate } from './db/migrate.js';
 import { requireClerkAuth, socketClerkAuth } from './auth/middleware.js';
-import { listDocumentsForUser, createDocumentForUser, validateLinkToken, rotateShareLink, getMemberRole } from './db/documents.js';
+import {
+  listDocumentsForUser,
+  createDocumentForUser,
+  validateLinkToken,
+  rotateShareLink,
+  getMemberRole,
+  getDocumentMetaForAccess,
+  updateDocumentMeta,
+} from './db/documents.js';
 import { listFoldersForUser, createFolderForUser } from './db/folders.js';
 import { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } from './db/updates.js';
+import {
+  listMessages,
+  insertMessage,
+  updateMessage,
+  softDeleteMessage,
+  MAX_CONTENT_CHARS,
+} from './db/chat.js';
 import { downloadSnapshotBytes, uploadSnapshot } from './r2/snapshots.js';
 import { validateCode } from './execution/executor.js';
 import { executionQueue } from './execution/queue.js';
 import aiRouter from './ai.js';
+import { chatLimiter } from './lib/rate-limiter.js';
+import { normalizeUserText } from './lib/text.js';
 
 /*
 PREVIOUS IMPLEMENTATION (commented out):
@@ -296,6 +313,7 @@ io.on('connection', (socket) => {
         snapshot,
         snapshotSeq: effectiveSnapshotSeq,
         updates: updates.map((u) => ({ seq: u.seq, update: u.update })),
+        role,
       });
 
       const room = io.sockets.adapter.rooms.get(documentId);
@@ -446,54 +464,216 @@ io.on('connection', (socket) => {
     }
   }));
 
-  socket.on('send-message', wrapHandler((data) => {
-    const { documentId, message, userId } = data;
-    console.log(`Client ${socket.id} sending message:`, message);
+  /*
+  PREVIOUS IMPLEMENTATION (commented out):
+  - `send-message` / `message-received` / `typing-start` / `typing-stop` were ephemeral —
+    messages were broadcast to the room but never persisted.
 
-    // Broadcast message to other clients in the same document
+  Reason for change (Phase 7):
+  - Document chat is now persisted in the `chat_messages` table so users see history when
+    they reopen a document. The websocket events were renamed to `chat:*` to make the
+    contract explicit and to leave the legacy events available if any old client connects.
+  */
+
+  // Per-user sliding-window rate limit for chat sends, backed by Redis.
+  // Lives in lib/rate-limiter.js — keyed on the DB user id, so multiple tabs
+  // from the same user share the same budget.
+  socket.on('chat:send', wrapHandler(async (data) => {
+    const documentId = data?.documentId;
+    const clientId = typeof data?.clientId === 'string' ? data.clientId : null;
+    const content = typeof data?.content === 'string' ? data.content : '';
+    // Phase 2 additions — both optional. Parent linkage is validated against
+    // the document inside the SQL itself (see db/chat.js insertMessage), and
+    // mentions are resolved server-side against the users table so a malicious
+    // client can't fabricate a "mention" that lights up an arbitrary span.
+    const parentId = typeof data?.parentId === 'string' ? data.parentId : null;
+    const mentions = Array.isArray(data?.mentions) ? data.mentions : [];
+
+    if (!documentId) return;
+    const docInfo = socket.data.docs?.[documentId];
+    if (!docInfo) {
+      safeEmit('chat:error', { clientId, message: 'not_in_document' });
+      return;
+    }
+
+    // Chat is intentionally available to viewers as well — chat is collaboration
+    // UX, not document-edit. (Decision: Phase 7 design review.)
+    const user = socket.data.user;
+    if (!user?.id) {
+      safeEmit('chat:error', { clientId, message: 'unauthenticated' });
+      return;
+    }
+
+    // Normalize before any other processing so the rate limit / length check
+    // operate on what we are actually going to store.
+    const { value: normalized, truncated } = normalizeUserText(content, {
+      max: MAX_CONTENT_CHARS,
+    });
+    if (!normalized) return;
+    if (truncated) {
+      safeEmit('chat:error', { clientId, message: 'content_too_long' });
+      return;
+    }
+
+    const limit = await chatLimiter.check(user.id);
+    if (!limit.allowed) {
+      safeEmit('chat:error', { clientId, message: 'rate_limited' });
+      return;
+    }
+
     try {
-      socket.to(documentId).emit('message-received', {
+      const message = await insertMessage({
         documentId,
-        message,
-        userId: userId || socket.id,
-        userName: `User ${(userId || socket.id).slice(0, 6)}`,
-        timestamp: Date.now()
+        userId: user.id,
+        clientId,
+        content: normalized,
+        parentId,
+        mentions,
+        senderClerkId: user.clerkUserId ?? null,
       });
-    } catch (error) {
-      console.error('[WebSocket] Error emitting message-received:', error.message);
+
+      io.to(documentId).emit('chat:message', message);
+    } catch (e) {
+      console.error('[chat:send] persist failed:', e?.message || e);
+      safeEmit('chat:error', { clientId, message: 'persist_failed' });
     }
   }));
 
-  // Handle typing indicators
-  socket.on('typing-start', wrapHandler((data) => {
-    const { documentId, userName } = data;
-    console.log(`Client ${socket.id} started typing in ${documentId}`);
+  // Edit an own, non-deleted message that's still inside the 15-min window.
+  // The window + ownership are enforced in SQL so this handler is just plumbing.
+  socket.on('chat:edit', wrapHandler(async (data) => {
+    const documentId = data?.documentId;
+    const messageId = data?.messageId;
+    const content = typeof data?.content === 'string' ? data.content : '';
 
-    // Broadcast typing start to other clients
+    if (!documentId || !messageId) return;
+    const docInfo = socket.data.docs?.[documentId];
+    if (!docInfo) {
+      safeEmit('chat:error', { messageId, message: 'not_in_document' });
+      return;
+    }
+
+    const user = socket.data.user;
+    if (!user?.id) {
+      safeEmit('chat:error', { messageId, message: 'unauthenticated' });
+      return;
+    }
+
+    const { value: normalized, truncated } = normalizeUserText(content, {
+      max: MAX_CONTENT_CHARS,
+    });
+    if (!normalized) {
+      // Empty edit — caller should use chat:delete instead. We don't want to
+      // silently turn an edit into a delete because that would surprise the UI.
+      safeEmit('chat:error', { messageId, message: 'empty_content' });
+      return;
+    }
+    if (truncated) {
+      safeEmit('chat:error', { messageId, message: 'content_too_long' });
+      return;
+    }
+
+    const limit = await chatLimiter.check(user.id);
+    if (!limit.allowed) {
+      safeEmit('chat:error', { messageId, message: 'rate_limited' });
+      return;
+    }
+
     try {
-      socket.to(documentId).emit('typing-start', {
-        documentId,
-        userName,
-        userId: socket.id
+      const updated = await updateMessage({
+        messageId,
+        userId: user.id,
+        content: normalized,
       });
-    } catch (error) {
-      console.error('[WebSocket] Error emitting typing-start:', error.message);
+      if (!updated) {
+        // Either the user isn't the owner, the message is already deleted,
+        // or the 15-minute window has passed. We surface a single error
+        // because we don't want to leak which one to a malicious client.
+        safeEmit('chat:error', { messageId, message: 'edit_forbidden' });
+        return;
+      }
+      io.to(documentId).emit('chat:message:updated', updated);
+    } catch (e) {
+      console.error('[chat:edit] update failed:', e?.message || e);
+      safeEmit('chat:error', { messageId, message: 'persist_failed' });
     }
   }));
 
-  socket.on('typing-stop', wrapHandler((data) => {
-    const { documentId, userName } = data;
-    console.log(`Client ${socket.id} stopped typing in ${documentId}`);
+  // Soft-delete an own message inside the 15-min window. Same auth gate as edit.
+  socket.on('chat:delete', wrapHandler(async (data) => {
+    const documentId = data?.documentId;
+    const messageId = data?.messageId;
 
-    // Broadcast typing stop to other clients
+    if (!documentId || !messageId) return;
+    const docInfo = socket.data.docs?.[documentId];
+    if (!docInfo) {
+      safeEmit('chat:error', { messageId, message: 'not_in_document' });
+      return;
+    }
+
+    const user = socket.data.user;
+    if (!user?.id) {
+      safeEmit('chat:error', { messageId, message: 'unauthenticated' });
+      return;
+    }
+
+    // Apply the same per-user limiter — a runaway "delete all" loop would
+    // otherwise be cheap to weaponize.
+    const limit = await chatLimiter.check(user.id);
+    if (!limit.allowed) {
+      safeEmit('chat:error', { messageId, message: 'rate_limited' });
+      return;
+    }
+
     try {
-      socket.to(documentId).emit('typing-stop', {
+      const deleted = await softDeleteMessage({
+        messageId,
+        userId: user.id,
+      });
+      if (!deleted) {
+        safeEmit('chat:error', { messageId, message: 'delete_forbidden' });
+        return;
+      }
+      // We ship the full row (with content blanked + deletedAt set) so every
+      // client can reconcile the same state, including reply-quote previews
+      // pointing at this message.
+      io.to(documentId).emit('chat:message:deleted', {
+        messageId: deleted.id,
+        documentId: deleted.documentId,
+        deletedAt: deleted.deletedAt,
+      });
+    } catch (e) {
+      console.error('[chat:delete] delete failed:', e?.message || e);
+      safeEmit('chat:error', { messageId, message: 'persist_failed' });
+    }
+  }));
+
+  // Ephemeral typing indicator. Not persisted.
+  socket.on('chat:typing', wrapHandler((data) => {
+    const documentId = data?.documentId;
+    const isTyping = !!data?.isTyping;
+    if (!documentId) return;
+    const docInfo = socket.data.docs?.[documentId];
+    if (!docInfo) return;
+
+    const user = socket.data.user;
+    if (!user?.id) return;
+
+    try {
+      // We emit the stable Clerk id alongside the internal users.id so clients
+      // can self-filter against their own Clerk user object (the only id the
+      // frontend reliably has). userName is best-effort and may be null when
+      // a user hasn't synced their profile yet — clients handle the fallback.
+      socket.to(documentId).emit('chat:typing', {
         documentId,
-        userName,
-        userId: socket.id
+        userId: user.id,
+        userClerkId: user.clerkUserId,
+        userName: user.name || null,
+        userAvatarUrl: user.avatarUrl || null,
+        isTyping,
       });
     } catch (error) {
-      console.error('[WebSocket] Error emitting typing-stop:', error.message);
+      console.error('[WebSocket] Error emitting chat:typing:', error.message);
     }
   }));
 
@@ -656,6 +836,43 @@ app.get('/api/documents', requireClerkAuth, async (req, res) => {
   res.json({ documents: docs });
 });
 
+app.get('/api/documents/:id', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  const linkToken = typeof req.query.linkToken === 'string' ? req.query.linkToken : null;
+  try {
+    const meta = await getDocumentMetaForAccess({
+      userId: req.user.id,
+      documentId: id,
+      linkToken,
+    });
+    if (!meta) return res.status(404).json({ error: 'not_found' });
+    res.json(meta);
+  } catch (e) {
+    console.error('[GET /api/documents/:id]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.patch('/api/documents/:id', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  const { title, editorLanguage } = req.body || {};
+  try {
+    await updateDocumentMeta({
+      userId: req.user.id,
+      documentId: id,
+      title,
+      editorLanguage,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.statusCode === 403) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    console.error('[PATCH /api/documents/:id]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 app.post('/api/documents', requireClerkAuth, async (req, res) => {
   // PREVIOUS IMPLEMENTATION (commented out):
   // - Created a document with only a title (blank Yjs state).
@@ -668,7 +885,7 @@ app.post('/api/documents', requireClerkAuth, async (req, res) => {
   // const doc = await createDocumentForUser({ userId: req.user.id, title: title || 'Untitled' });
   // res.json(doc);
 
-  const { title, initialContent } = req.body || {};
+  const { title, initialContent, editorLanguage } = req.body || {};
 
   let initialUpdateBytes = null;
   if (typeof initialContent === 'string' && initialContent.length > 0) {
@@ -681,6 +898,7 @@ app.post('/api/documents', requireClerkAuth, async (req, res) => {
     userId: req.user.id,
     title: title || 'Untitled',
     initialUpdateBytes,
+    editorLanguage,
   });
   res.json(doc);
 });
@@ -769,6 +987,36 @@ app.post('/api/execute', requireClerkAuth, async (req, res) => {
         status: 'failed',
       });
     }
+  }
+});
+
+// Phase 7: Document Chat — paginated history.
+// Auth: any role (owner/editor/viewer) can read messages, OR an authenticated
+// user holding a valid share-link token. Mirrors the socket `join-document`
+// authorization so REST and websocket paths stay in sync.
+app.get('/api/documents/:id/messages', requireClerkAuth, async (req, res) => {
+  const { id: documentId } = req.params;
+  const { before, limit, linkToken } = req.query;
+
+  try {
+    let role = await getMemberRole({ userId: req.user.id, documentId });
+    if (!role && typeof linkToken === 'string' && linkToken.length > 0) {
+      role = await validateLinkToken({ documentId, token: linkToken });
+    }
+    if (!role) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const parsedLimit = limit ? Number(limit) : undefined;
+    const messages = await listMessages({
+      documentId,
+      before: typeof before === 'string' && before.length > 0 ? before : undefined,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    });
+    res.json({ messages });
+  } catch (e) {
+    console.error('list messages failed:', e?.message || e);
+    res.status(500).json({ error: 'list_messages_failed' });
   }
 });
 

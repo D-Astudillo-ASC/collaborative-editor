@@ -103,6 +103,10 @@ export function MonacoEditor({
   awareness,
 }: MonacoEditorProps) {
   const { isDark } = useTheme();
+  /** Monaco mounts asynchronously; onMount must read latest language (e.g. from GET /documents/:id), not first-render default. */
+  const languageRef = useRef(language);
+  languageRef.current = language;
+
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const bindingRef = useRef<MonacoBinding | null>(null);
@@ -295,8 +299,11 @@ export function MonacoEditor({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
+    const lang = languageRef.current;
+    const monacoLang = languageConfigs[lang]?.monacoLanguage || 'plaintext';
+
     // Configure TypeScript/TSX: full language service configuration (from CodeEditor.tsx)
-    if (monacoLanguage === 'typescript' || language === 'typescript' || language === 'typescriptreact') {
+    if (monacoLang === 'typescript' || lang === 'typescript' || lang === 'typescriptreact') {
       // In Monaco 0.55.1+, access TypeScript API via the typescript namespace
       const tsDefaults = (monaco as typeof monaco).typescript.typescriptDefaults;
 
@@ -363,71 +370,90 @@ export function MonacoEditor({
         "file:///node_modules/@types/react/jsx-runtime.d.ts"
       );
 
-      // Create model with proper URI for TSX support (only if model doesn't exist or needs updating)
-      const currentModel = editor.getModel();
-      const expectedUri = monaco.Uri.file('App.tsx').toString();
+      // After async CDN fetches, language may have changed (e.g. doc meta loaded).
+      const langForModel = languageRef.current;
+      const monacoLangForModel =
+        languageConfigs[langForModel]?.monacoLanguage || 'plaintext';
+      const stillTsFamily =
+        monacoLangForModel === 'typescript' ||
+        langForModel === 'typescript' ||
+        langForModel === 'typescriptreact';
 
-      // CRITICAL: Prevent creating a new model if one already exists with content (prevents wiping Yjs content)
-      // This can happen in React StrictMode where handleEditorMount is called multiple times
-      if (!currentModel && !modelCreatedRef.current) {
-        // No model exists and we haven't created one yet - create one with Yjs content if available, otherwise value prop
-        // CRITICAL: Prioritize Yjs content, but don't use empty Yjs if value prop has content
-        const yjsContent = yText ? yText.toString() : '';
-        const valueContent = value || '';
-        const initialContent = (yjsContent.length > 0)
-          ? yjsContent
-          : (valueContent.length > 0 ? valueContent : '');
-        const model = monaco.editor.createModel(initialContent, "typescript", monaco.Uri.file('App.tsx'));
-        editor.setModel(model);
-        modelCreatedRef.current = true;
-        console.log('🔧 Created TypeScript model with .tsx URI for proper TSX support', {
-          contentLength: initialContent.length,
-          fromYjs: yjsContent.length > 0,
-          fromValue: yjsContent.length === 0 && valueContent.length > 0,
-        });
-      } else if (currentModel && currentModel.uri.toString() !== expectedUri && !modelCreatedRef.current) {
-        // Model exists but has wrong URI - need to replace it
-        // CRITICAL: If model already has content, preserve it (Yjs might have synced already)
-        const existingContent = currentModel.getValue();
-        const yjsContent = yText ? yText.toString() : '';
+      if (stillTsFamily) {
+        // Create model with proper URI for TSX support (only if model doesn't exist or needs updating)
+        const currentModel = editor.getModel();
+        const expectedUri = monaco.Uri.file('App.tsx').toString();
 
-        // CRITICAL: Preserve existing content if it exists (don't wipe it)
-        // Only use Yjs content if model is empty AND Yjs has content
-        // If both are empty, use empty string (new document)
-        const initialContent = (existingContent.length > 0)
-          ? existingContent
-          : (yjsContent.length > 0 ? yjsContent : (value || ''));
+        // CRITICAL: Prevent creating a new model if one already exists with content (prevents wiping Yjs content)
+        // This can happen in React StrictMode where handleEditorMount is called multiple times
+        if (!currentModel && !modelCreatedRef.current) {
+          // No model exists and we haven't created one yet - create one with Yjs content if available, otherwise value prop
+          // CRITICAL: Prioritize Yjs content, but don't use empty Yjs if value prop has content
+          const yjsContent = yText ? yText.toString() : '';
+          const valueContent = value || '';
+          const initialContent = (yjsContent.length > 0)
+            ? yjsContent
+            : (valueContent.length > 0 ? valueContent : '');
+          const model = monaco.editor.createModel(
+            initialContent,
+            monacoLangForModel,
+            monaco.Uri.file('App.tsx')
+          );
+          editor.setModel(model);
+          modelCreatedRef.current = true;
+          console.log('🔧 Created TypeScript model with .tsx URI for proper TSX support', {
+            contentLength: initialContent.length,
+            fromYjs: yjsContent.length > 0,
+            fromValue: yjsContent.length === 0 && valueContent.length > 0,
+          });
+        } else if (currentModel && currentModel.uri.toString() !== expectedUri && !modelCreatedRef.current) {
+          // Model exists but has wrong URI - need to replace it
+          // CRITICAL: If model already has content, preserve it (Yjs might have synced already)
+          const existingContent = currentModel.getValue();
+          const yjsContent = yText ? yText.toString() : '';
 
-        const model = monaco.editor.createModel(initialContent, "typescript", monaco.Uri.file('App.tsx'));
-        editor.setModel(model);
-        modelCreatedRef.current = true;
-        console.log('🔧 Replaced model with TypeScript .tsx URI', {
-          contentLength: initialContent.length,
-          fromYjs: yjsContent.length > 0 && existingContent.length === 0,
-          preservedExisting: existingContent.length > 0,
-          fromValue: existingContent.length === 0 && yjsContent.length === 0 && (value || '').length > 0,
-        });
-      } else if (currentModel && currentModel.uri.toString() === expectedUri) {
-        // Model already exists with correct URI
-        // DO NOT replace it - just sync content if Yjs has content and model is empty
-        // If model already has content, bindYjsToEditor will handle syncing
-        modelCreatedRef.current = true; // Mark as created to prevent re-creation
-        if (yText) {
-          const yjsContent = yText.toString();
-          const modelContent = currentModel.getValue();
-          // CRITICAL: Only sync if Yjs has content AND model is empty (initial state)
-          // If model has content, DON'T overwrite it - bindYjsToEditor will handle syncing
-          // This prevents wiping content when Yjs is still loading
-          if (yjsContent.length > 0 && modelContent.length === 0) {
-            console.log('[MonacoEditor] Syncing empty model with Yjs content', {
-              yjsLength: yjsContent.length,
-            });
-            currentModel.setValue(yjsContent);
-          } else if (yjsContent.length === 0 && modelContent.length > 0) {
-            // Yjs is empty but model has content - don't wipe it (Yjs might still be loading)
-            console.log('[MonacoEditor] Yjs is empty, preserving model content (Yjs may still be loading)', {
-              modelLength: modelContent.length,
-            });
+          // CRITICAL: Preserve existing content if it exists (don't wipe it)
+          // Only use Yjs content if model is empty AND Yjs has content
+          // If both are empty, use empty string (new document)
+          const initialContent = (existingContent.length > 0)
+            ? existingContent
+            : (yjsContent.length > 0 ? yjsContent : (value || ''));
+
+          const model = monaco.editor.createModel(
+            initialContent,
+            monacoLangForModel,
+            monaco.Uri.file('App.tsx')
+          );
+          editor.setModel(model);
+          modelCreatedRef.current = true;
+          console.log('🔧 Replaced model with TypeScript .tsx URI', {
+            contentLength: initialContent.length,
+            fromYjs: yjsContent.length > 0 && existingContent.length === 0,
+            preservedExisting: existingContent.length > 0,
+            fromValue: existingContent.length === 0 && yjsContent.length === 0 && (value || '').length > 0,
+          });
+        } else if (currentModel && currentModel.uri.toString() === expectedUri) {
+          // Model already exists with correct URI
+          // DO NOT replace it - just sync content if Yjs has content and model is empty
+          // If model already has content, bindYjsToEditor will handle syncing
+          modelCreatedRef.current = true; // Mark as created to prevent re-creation
+          if (yText) {
+            const yjsContent = yText.toString();
+            const modelContent = currentModel.getValue();
+            // CRITICAL: Only sync if Yjs has content AND model is empty (initial state)
+            // If model has content, DON'T overwrite it - bindYjsToEditor will handle syncing
+            // This prevents wiping content when Yjs is still loading
+            if (yjsContent.length > 0 && modelContent.length === 0) {
+              console.log('[MonacoEditor] Syncing empty model with Yjs content', {
+                yjsLength: yjsContent.length,
+              });
+              currentModel.setValue(yjsContent);
+            } else if (yjsContent.length === 0 && modelContent.length > 0) {
+              // Yjs is empty but model has content - don't wipe it (Yjs might still be loading)
+              console.log('[MonacoEditor] Yjs is empty, preserving model content (Yjs may still be loading)', {
+                modelLength: modelContent.length,
+              });
+            }
           }
         }
       }
@@ -587,6 +613,16 @@ export function MonacoEditor({
       monaco.editor.setTheme(themeName);
     });
   }, [isDark]);
+
+  // Keep Monaco model language in sync when toolbar/API language changes (onMount alone is not enough).
+  useEffect(() => {
+    const ed = editorRef.current;
+    const monacoInstance = monacoRef.current;
+    if (!ed || !monacoInstance) return;
+    const model = ed.getModel();
+    if (!model) return;
+    monacoInstance.editor.setModelLanguage(model, monacoLanguage);
+  }, [monacoLanguage]);
 
   // Bind Yjs when yText becomes available
   useEffect(() => {

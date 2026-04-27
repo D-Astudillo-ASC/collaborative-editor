@@ -93,6 +93,18 @@ DATABASE_URL=postgres://...
 CLERK_ISSUER=https://...   # your Clerk issuer
 CLERK_JWKS_URL=https://... # your Clerk JWKS endpoint
 
+# Required Clerk session-token template (Dashboard → Configure → Sessions →
+# Customize session token):
+#   {
+#     "email":      "{{user.primary_email_address}}",
+#     "name":       "{{user.full_name}}",
+#     "first_name": "{{user.first_name}}",
+#     "last_name":  "{{user.last_name}}",
+#     "image_url":  "{{user.image_url}}"
+#   }
+# Without this, chat messages and presence will fall back to email-prefix /
+# "User" because Clerk's default token only carries `sub`.
+
 # Optional: Backblaze B2 (S3-compatible) snapshots
 # Note: server code uses R2_* prefix (works for both R2 and B2)
 R2_ENDPOINT=https://s3.<region>.backblazeb2.com

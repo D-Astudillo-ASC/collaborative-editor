@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { requireClerkAuth } from './auth/middleware.js';
+import { aiLimiter } from './lib/rate-limiter.js';
 
 const router = Router();
 
@@ -63,33 +64,11 @@ function stripInvisibleChars(text) {
     .replace(/[\u2066-\u2069]/g, ''); // bidirectional isolates
 }
 
-// ---------------------------------------------------------------------------
-// Rate limiting — simple in-memory sliding window per authenticated user.
-// Replace with Redis for multi-instance / production deployments.
-// ---------------------------------------------------------------------------
-const _rateLimitWindows = new Map();
-const RATE_LIMIT_MAX = 20;     // requests
-const RATE_LIMIT_WINDOW = 60_000; // ms
-
-function checkRateLimit(userId) {
-  const now = Date.now();
-  const entry = _rateLimitWindows.get(userId);
-  if (!entry || now - entry.start > RATE_LIMIT_WINDOW) {
-    _rateLimitWindows.set(userId, { count: 1, start: now });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false;
-  entry.count++;
-  return true;
-}
-
-// Prune stale windows every 5 minutes to avoid memory growth.
-setInterval(() => {
-  const cutoff = Date.now() - RATE_LIMIT_WINDOW;
-  for (const [id, entry] of _rateLimitWindows) {
-    if (entry.start < cutoff) _rateLimitWindows.delete(id);
-  }
-}, 300_000);
+// Rate limiting moved to server/lib/rate-limiter.js (Redis-backed, atomic,
+// per-user, multi-instance-safe). The previous in-memory limiter keyed off
+// `req.auth?.userId` which is never set by the auth middleware, so every
+// request collapsed to the literal string "anonymous" and the limit was
+// effectively global rather than per-user. See docs/hardening/PHASE_1.md.
 
 // ---------------------------------------------------------------------------
 // Output credential scanner — redacts common secret patterns from model
@@ -375,10 +354,19 @@ router.post('/chat', requireClerkAuth, async (req, res) => {
     return res.status(503).json({ error: 'AI service not configured (GOOGLE_AI_API_KEY missing)' });
   }
 
-  // Rate limit per authenticated user — prevents API quota exhaustion attacks
-  const userId = req.auth?.userId || req.auth?.sub || 'anonymous';
-  if (!checkRateLimit(userId)) {
-    return res.status(429).json({ error: 'Too many requests — please wait a moment before sending another message.' });
+  // Rate limit per authenticated user — keyed on the DB user id (the only
+  // identifier the auth middleware reliably populates).
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthenticated' });
+  }
+  const limit = await aiLimiter.check(userId);
+  if (!limit.allowed) {
+    const resetIn = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(resetIn));
+    return res.status(429).json({
+      error: limit.error || `Too many requests — please wait ${resetIn}s before sending another message.`,
+    });
   }
 
   // Validate and sanitize context fields before they reach the model

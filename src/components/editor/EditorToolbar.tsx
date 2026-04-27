@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   ChevronDown,
@@ -52,6 +52,8 @@ interface EditorToolbarProps {
   templateCount?: number;
   onBack?: () => void;
   executionMode?: ExecutionMode;
+  /** When false (e.g. viewer / link view-only), title, language, and templates are locked. */
+  canEditDocument?: boolean;
 }
 
 export function EditorToolbar({
@@ -68,9 +70,18 @@ export function EditorToolbar({
   templateCount = 17,
   onBack,
   executionMode = 'console',
+  canEditDocument = true,
 }: EditorToolbarProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(title);
+
+  useEffect(() => {
+    setEditedTitle(title);
+  }, [title]);
+
+  useEffect(() => {
+    if (!canEditDocument) setIsEditingTitle(false);
+  }, [canEditDocument]);
 
   const languageConfig = languageConfigs[language];
   const LanguageIcon = languageConfig?.icon || FileCode;
@@ -159,8 +170,8 @@ export function EditorToolbar({
           </Tooltip>
         )}
 
-        {/* Editable Title */}
-        {isEditingTitle ? (
+        {/* Title — editable only when canEditDocument */}
+        {canEditDocument && isEditingTitle ? (
           <div className="flex items-center gap-2">
             <Input
               value={editedTitle}
@@ -180,19 +191,29 @@ export function EditorToolbar({
               <X className="h-3.5 w-3.5 text-red-500" />
             </Button>
           </div>
-        ) : (
+        ) : canEditDocument ? (
           <button
+            type="button"
             onClick={() => setIsEditingTitle(true)}
             className="rounded px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-muted"
           >
             {title}
           </button>
+        ) : (
+          <span className="max-w-[12rem] truncate px-2 py-1 text-sm font-medium text-muted-foreground">
+            {title}
+          </span>
         )}
 
         {/* Language Selector */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              disabled={!canEditDocument}
+            >
               <LanguageIcon className="h-3.5 w-3.5" style={{ color: languageConfig?.color }} />
               <span>{languageConfig?.name}</span>
               <ChevronDown className="h-3 w-3 opacity-50" />
@@ -205,6 +226,7 @@ export function EditorToolbar({
               return (
                 <DropdownMenuItem
                   key={lang}
+                  disabled={!canEditDocument}
                   onClick={() => onLanguageChange(lang)}
                   className="gap-2"
                 >
@@ -220,6 +242,11 @@ export function EditorToolbar({
 
       {/* Center Section: Execution Mode + Connection Status + Collaborators */}
       <div className="flex items-center gap-4">
+        {!canEditDocument && (
+          <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+            View only
+          </Badge>
+        )}
         {/* Execution Mode Indicator */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -322,6 +349,7 @@ export function EditorToolbar({
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5"
+              disabled={!canEditDocument}
               onClick={onOpenTemplates}
             >
               <LayoutTemplate className="h-4 w-4" />

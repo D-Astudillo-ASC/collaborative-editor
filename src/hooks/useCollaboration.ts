@@ -14,6 +14,8 @@ interface UseCollaborationOptions {
   linkToken?: string | null; // Optional share link token for document access
 }
 
+export type DocumentAccessRole = 'owner' | 'editor' | 'viewer';
+
 export function useCollaboration({ documentId, user, linkToken }: UseCollaborationOptions) {
   const navigate = useNavigate();
   const { token, isAuthenticated, isLoaded } = useAuth();
@@ -24,6 +26,8 @@ export function useCollaboration({ documentId, user, linkToken }: UseCollaborati
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
   const [activeUserIds, setActiveUserIds] = useState<string[]>([]);
   const activeUserIdsRef = useRef<string[]>([]); // Ref to track active users for awareness filtering
+  /** From `doc-init.role` — drives read-only UI for link/member viewers. */
+  const [documentRole, setDocumentRole] = useState<DocumentAccessRole>('editor');
 
   // Refs for Yjs and Socket
   const ydocRef = useRef<Y.Doc | null>(null);
@@ -71,6 +75,10 @@ export function useCollaboration({ documentId, user, linkToken }: UseCollaborati
   // Keep refs in sync
   useEffect(() => {
     documentIdRef.current = documentId;
+  }, [documentId]);
+
+  useEffect(() => {
+    setDocumentRole('editor');
   }, [documentId]);
 
   useEffect(() => {
@@ -550,6 +558,12 @@ export function useCollaboration({ documentId, user, linkToken }: UseCollaborati
         });
         return;
       }
+      const r = init.role;
+      if (r === 'owner' || r === 'editor' || r === 'viewer') {
+        setDocumentRole(r);
+      } else {
+        setDocumentRole('editor');
+      }
       console.log('[useCollaboration] Initializing Yjs from server data');
       try {
         initYjsFromServer(init);
@@ -818,6 +832,7 @@ export function useCollaboration({ documentId, user, linkToken }: UseCollaborati
     connectionStatus,
     lastSynced,
     activeUserIds,
+    documentRole,
     updateCursor,
     getTextBinding,
     // Expose refs for advanced usage

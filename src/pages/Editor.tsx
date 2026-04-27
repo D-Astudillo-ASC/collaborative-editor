@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { MessageSquare, Bot, PanelRightClose, Trash2 } from 'lucide-react';
 import { AIAssistantPanel } from '@/components/editor/AIAssistantPanel';
 import type { AIAssistantPanelHandle } from '@/components/editor/AIAssistantPanel';
+import { ChatPanel } from '@/components/editor/ChatPanel';
+import type { ChatPanelHandle } from '@/components/editor/ChatPanel';
+import { useDocumentChat } from '@/hooks/useDocumentChat';
 import { toast } from 'sonner';
 
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -20,6 +23,7 @@ import { useCollaboration } from '@/hooks/useCollaboration';
 import { useCodeExecution } from '@/hooks/useCodeExecution';
 import { useUnifiedExecution } from '@/hooks/useUnifiedExecution';
 import { templates } from '@/constants/templates';
+import { languages } from '@/constants/languages';
 import { apiUrl } from '@/config/backend';
 import { UnifiedOutputPanel } from '@/components/editor/UnifiedOutputPanel';
 import type { Language, Template } from '@/types';
@@ -58,10 +62,34 @@ export default function Editor() {
   const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<'chat' | 'ai'>('ai');
+
+  // Chat is "visible" only when the right panel is open AND its tab is Chat.
+  // This drives unread tracking (incoming messages while hidden bump the badge).
+  const isChatVisible = isRightPanelOpen && rightPanelTab === 'chat';
+
+  const chat = useDocumentChat({
+    documentId: documentId || null,
+    isVisible: isChatVisible,
+    linkToken,
+  });
   // Selected text in Monaco — passed to AI panel as optional context
   const [editorSelection, setEditorSelection] = useState<string>('');
-  // Ref to AI panel for clearing conversation from the tab bar's Clear button
+  // Refs to right-panel children — used to clear AI conversation and to
+  // focus the relevant input when the user activates a tab.
   const aiPanelRef = useRef<AIAssistantPanelHandle | null>(null);
+  const chatPanelRef = useRef<ChatPanelHandle | null>(null);
+
+  // Focus the active right-panel's input on tab activation. Without this the
+  // user has to click the textarea after switching tabs, which is an a11y
+  // regression. The rAF gives the panel one frame to mount its DOM nodes.
+  useEffect(() => {
+    if (!isRightPanelOpen) return;
+    const id = requestAnimationFrame(() => {
+      if (rightPanelTab === 'ai') aiPanelRef.current?.focusInput();
+      else if (rightPanelTab === 'chat') chatPanelRef.current?.focusInput();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [rightPanelTab, isRightPanelOpen]);
 
   // Imperative ref for right panel — always mounted, collapsed/expanded via API
   const rightPanelRef = useRef<PanelImperativeHandle | null>(null);
@@ -83,11 +111,101 @@ export default function Editor() {
     lastSynced,
     yText,
     awareness,
+    documentRole,
   } = useCollaboration({
     documentId: documentId || '', // Empty string will be handled by the hook
     user: user || null,
     linkToken, // Pass linkToken for share link access
   });
+
+  const canEditDocument = documentRole !== 'viewer';
+
+  const documentRoleRef = useRef(documentRole);
+  useEffect(() => {
+    documentRoleRef.current = documentRole;
+  }, [documentRole]);
+
+  const docPatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDocPatchRef = useRef<{ title?: string; editorLanguage?: string }>({});
+
+  const patchDocument = useCallback(
+    async (body: { title?: string; editorLanguage?: string }) => {
+      if (!documentId || documentRoleRef.current === 'viewer') return;
+      const t = await getAccessToken();
+      if (!t) return;
+      const res = await fetch(apiUrl(`/api/documents/${documentId}`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${t}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok && res.status !== 403) {
+        console.warn('[Editor] document meta PATCH failed', res.status);
+      }
+    },
+    [documentId, getAccessToken],
+  );
+
+  /** Debounced merge — multiple fields (e.g. title) won’t clobber each other. */
+  const scheduleDocPatch = useCallback(
+    (body: { title?: string; editorLanguage?: string }) => {
+      if (documentRoleRef.current === 'viewer') return;
+      pendingDocPatchRef.current = { ...pendingDocPatchRef.current, ...body };
+      if (docPatchTimerRef.current) clearTimeout(docPatchTimerRef.current);
+      docPatchTimerRef.current = setTimeout(() => {
+        docPatchTimerRef.current = null;
+        const merged = pendingDocPatchRef.current;
+        pendingDocPatchRef.current = {};
+        if (Object.keys(merged).length === 0) return;
+        void patchDocument(merged);
+      }, 450);
+    },
+    [patchDocument],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (docPatchTimerRef.current) clearTimeout(docPatchTimerRef.current);
+    };
+  }, []);
+
+  // Title + language from Postgres (and role-aware access via link token).
+  useEffect(() => {
+    if (!documentId || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await getAccessToken();
+        if (!t) return;
+        const params = new URLSearchParams();
+        if (linkToken) params.set('linkToken', linkToken);
+        const q = params.toString();
+        const res = await fetch(
+          apiUrl(`/api/documents/${documentId}${q ? `?${q}` : ''}`),
+          { headers: { Authorization: `Bearer ${t}` } },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (typeof data.title === 'string' && data.title.trim()) {
+          setTitle(data.title);
+        }
+        if (
+          typeof data.editorLanguage === 'string' &&
+          languages.includes(data.editorLanguage as Language)
+        ) {
+          setLanguage(data.editorLanguage as Language);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, user, linkToken, getAccessToken]);
 
   // Unified Execution Hook (for preview/console/analysis modes)
   const {
@@ -181,14 +299,23 @@ export default function Editor() {
     setLanguage(newLanguage);
     setCurrentCategory(undefined); // Reset category when language changes
     toast.success(`Language changed to ${newLanguage}`);
-  }, []);
+    // Persist immediately so a pending title debounce can’t drop this update.
+    void patchDocument({ editorLanguage: newLanguage });
+  }, [patchDocument]);
 
   const handleTitleChange = useCallback((newTitle: string) => {
     setTitle(newTitle);
     toast.success('Title updated');
-  }, []);
+    scheduleDocPatch({ title: newTitle });
+  }, [scheduleDocPatch]);
 
   const handleSelectTemplate = useCallback((template: Template) => {
+    if (!canEditDocument) {
+      toast.message('View-only access', {
+        description: 'You can’t change the document with this link.',
+      });
+      return;
+    }
     if (yText) {
       // Delete all existing content and insert template code
       const currentLength = yText.length;
@@ -199,6 +326,7 @@ export default function Editor() {
       // Language change will update the UI
       setLanguage(template.language);
       setCurrentCategory(template.category as TemplateCategory);
+      void patchDocument({ editorLanguage: template.language });
 
       // Auto-open output panel for preview mode
       if (executionMode === 'preview' || template.category === 'React' || template.category === 'HTML') {
@@ -215,6 +343,7 @@ export default function Editor() {
       setContent(template.code);
       setLanguage(template.language);
       setCurrentCategory(template.category as TemplateCategory);
+      void patchDocument({ editorLanguage: template.language });
 
       // Manually trigger preview update for immediate feedback
       if (template.category === 'React' || template.category === 'HTML') {
@@ -225,7 +354,7 @@ export default function Editor() {
 
       toast.success(`Applied template: ${template.name}`);
     }
-  }, [yText, executionMode, updatePreview]);
+  }, [yText, executionMode, updatePreview, canEditDocument, patchDocument]);
 
   const handleShare = useCallback(async () => {
     if (!documentId) return;
@@ -353,14 +482,16 @@ export default function Editor() {
       templateCount={templates.length}
       onBack={() => navigate('/dashboard')}
       executionMode={executionMode}
+      canEditDocument={canEditDocument}
     />
   );
 
   return (
     <AppLayout topBar={topBar} showSidebar={false}>
 
-      <div className="flex h-full flex-col">
+      <div className="relative flex h-full flex-col">
         <ResizablePanelGroup
+          id="collab-editor-main"
           direction="horizontal"
           className="flex-1"
           defaultLayout={{ 'editor-main-panel': 100, 'editor-right-panel': 0 }}
@@ -371,6 +502,7 @@ export default function Editor() {
             minSize="40"
           >
             <ResizablePanelGroup
+              id="collab-editor-vertical"
               direction="vertical"
               defaultLayout={{ 'editor-code-panel': 100, 'editor-output-panel': 0 }}
             >
@@ -396,6 +528,7 @@ export default function Editor() {
                         collaborators={collaborators}
                         yText={yText}
                         awareness={awareness}
+                        readOnly={!canEditDocument}
                       />
                     )}
                   </div>
@@ -506,11 +639,16 @@ export default function Editor() {
                         <Button
                           variant={rightPanelTab === 'chat' ? 'secondary' : 'ghost'}
                           size="sm"
-                          className="h-7 gap-1.5"
+                          className="relative h-7 gap-1.5"
                           onClick={() => setRightPanelTab('chat')}
                         >
                           <MessageSquare className="h-3.5 w-3.5" />
                           Chat
+                          {chat.unreadCount > 0 && rightPanelTab !== 'chat' && (
+                            <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+                              {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                            </span>
+                          )}
                         </Button>
                       </div>
                       <div className="flex items-center gap-1">
@@ -546,13 +684,31 @@ export default function Editor() {
                           language={language}
                           selection={editorSelection || undefined}
                         />
+                      ) : documentId ? (
+                        <ChatPanel
+                          ref={chatPanelRef}
+                          documentId={documentId}
+                          currentUser={user}
+                          collaborators={collaborators}
+                          messages={chat.messages}
+                          isLoading={chat.isLoading}
+                          hasMore={chat.hasMore}
+                          loadMore={chat.loadMore}
+                          sendMessage={chat.sendMessage}
+                          retryMessage={chat.retryMessage}
+                          editMessage={chat.editMessage}
+                          deleteMessage={chat.deleteMessage}
+                          setTyping={chat.setTyping}
+                          typingUsers={chat.typingUsers}
+                          error={chat.error}
+                        />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
                           <MessageSquare className="h-12 w-12 text-muted-foreground/30" />
                           <div>
                             <p className="font-medium">Document Chat</p>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              Collaborative chat coming in Phase 7
+                              Open a document to start chatting.
                             </p>
                           </div>
                         </div>
@@ -562,6 +718,35 @@ export default function Editor() {
             </ResizablePanel>
           </>
         </ResizablePanelGroup>
+
+        {/* Floating "open chat" affordance — visible only when the right panel
+            is fully collapsed. Carries the unread message badge so users know
+            there is activity even when the panel is hidden. */}
+        <AnimatePresence>
+          {!isRightPanelOpen && (
+            <motion.button
+              key="open-chat-fab"
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 12 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              onClick={() => {
+                setRightPanelTab('chat');
+                setIsRightPanelOpen(true);
+              }}
+              title="Open chat"
+              className="absolute right-3 top-3 z-20 flex h-9 items-center gap-1.5 rounded-full border border-border/60 bg-card/80 px-3 text-xs font-medium text-foreground shadow-lg shadow-black/5 backdrop-blur transition-all hover:border-primary/40 hover:bg-card"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Chat</span>
+              {chat.unreadCount > 0 && (
+                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+                  {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                </span>
+              )}
+            </motion.button>
+          )}
+        </AnimatePresence>
 
       </div>
 

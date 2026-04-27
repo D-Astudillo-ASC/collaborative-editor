@@ -5,6 +5,7 @@ import { Code2, Users, Terminal, Play, ArrowRight, Braces, Sparkles } from "luci
 import { useAuth as useClerkAuth } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Box, CircularProgress } from "@mui/material";
 
 const features = [
   {
@@ -42,9 +43,25 @@ const Landing = () => {
   const navigate = useNavigate();
   const { isLoaded, isSignedIn } = useClerkAuth();
 
+  // Don’t paint marketing content until Clerk hydrates — avoids a flash for
+  // returning users who will redirect to /dashboard immediately after.
+  if (!isLoaded) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   // Once Clerk has resolved, send authenticated users straight to their dashboard.
-  // This prevents the landing page from flashing for users who are already signed in.
-  if (isLoaded && isSignedIn) {
+  if (isSignedIn) {
     return <Navigate to="/dashboard" replace />;
   }
 
