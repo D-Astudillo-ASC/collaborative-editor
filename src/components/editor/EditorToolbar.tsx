@@ -33,6 +33,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { languageConfigs, languages } from '@/constants/languages';
 import type { Language, UserPresence, ConnectionStatus } from '@/types';
 import type { ExecutionMode } from '@/types/execution';
@@ -390,9 +391,10 @@ export function EditorToolbar({
               <span className="hidden sm:inline">Share</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Share document link</TooltipContent>
+          <TooltipContent>Share with people or link</TooltipContent>
         </Tooltip>
 
+        <NotificationBell />
         {/* Theme Toggle */}
         <ThemeToggle className="h-8 w-8" />
       </div>

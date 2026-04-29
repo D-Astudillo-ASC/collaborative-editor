@@ -710,7 +710,10 @@ export function useCollaboration({ documentId, user, linkToken }: UseCollaborati
       if (error?.message === 'forbidden' || error?.message === 'join_failed') {
         console.error('[useCollaboration] Backend rejected join-document request');
         setConnectionStatus('disconnected');
-        navigateRef.current('/dashboard');
+        const doc = documentIdRef.current ? encodeURIComponent(documentIdRef.current) : '';
+        navigateRef.current(
+          `/dashboard?notice=no_document_access${doc ? `&docId=${doc}` : ''}`,
+        );
       } else {
         setConnectionStatus('disconnected');
       }

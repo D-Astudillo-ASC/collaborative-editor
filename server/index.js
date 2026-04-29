@@ -49,6 +49,9 @@ import {
   getMemberRole,
   getDocumentMetaForAccess,
   updateDocumentMeta,
+  listDocumentMembersAndInvites,
+  updateDocumentMemberRole,
+  removeDocumentMember,
 } from './db/documents.js';
 import { listFoldersForUser, createFolderForUser } from './db/folders.js';
 import { getDocumentState, fetchUpdatesAfter, appendUpdate, markSnapshot } from './db/updates.js';
@@ -63,8 +66,19 @@ import { downloadSnapshotBytes, uploadSnapshot } from './r2/snapshots.js';
 import { validateCode } from './execution/executor.js';
 import { executionQueue } from './execution/queue.js';
 import aiRouter from './ai.js';
-import { chatLimiter } from './lib/rate-limiter.js';
+import { chatLimiter, inviteMemberLimiter, userSearchLimiter } from './lib/rate-limiter.js';
 import { normalizeUserText } from './lib/text.js';
+import { searchShareDirectory } from './db/share-directory.js';
+import { addDocumentMemberByUserId, addDocumentMemberByClerkId } from './db/document-members.js';
+import { createAccessRequest, resolveAccessRequest } from './db/access-requests.js';
+import {
+  listNotificationsForUser,
+  countUnreadNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  deleteNotificationForUser,
+  deleteAllNotificationsForUser,
+} from './db/notifications.js';
 
 /*
 PREVIOUS IMPLEMENTATION (commented out):
@@ -831,6 +845,31 @@ Reason for change:
 // });
 */
 
+app.get('/api/users/search', requireClerkAuth, async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const documentId = typeof req.query.documentId === 'string' ? req.query.documentId : null;
+  try {
+    const rl = await userSearchLimiter.check(String(req.user.id));
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: 'rate_limit',
+        message: 'Too many searches. Try again shortly.',
+        resetAt: rl.resetAt,
+      });
+    }
+    const { source, users } = await searchShareDirectory({
+      query: q,
+      documentId,
+      requesterUserId: req.user.id,
+      requesterClerkUserId: req.user.clerkUserId ?? null,
+    });
+    res.json({ source, users });
+  } catch (e) {
+    console.error('[GET /api/users/search]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 app.get('/api/documents', requireClerkAuth, async (req, res) => {
   const docs = await listDocumentsForUser(req.user.id);
   res.json({ documents: docs });
@@ -869,6 +908,237 @@ app.patch('/api/documents/:id', requireClerkAuth, async (req, res) => {
       return res.status(403).json({ error: 'forbidden' });
     }
     console.error('[PATCH /api/documents/:id]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.get('/api/documents/:id/members', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const data = await listDocumentMembersAndInvites({
+      userId: req.user.id,
+      documentId: id,
+    });
+    res.json(data);
+  } catch (e) {
+    if (e.statusCode === 403) return res.status(403).json({ error: 'forbidden' });
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    console.error('[GET /api/documents/:id/members]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/documents/:id/members', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  const body = req.body || {};
+  const { clerkUserId, userId } = body;
+  const role = body.role === 'viewer' ? 'viewer' : 'editor';
+  try {
+    const rl = await inviteMemberLimiter.check(String(req.user.id));
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: 'rate_limit',
+        message: 'Too many invitations in a short time. Try again in a minute.',
+        resetAt: rl.resetAt,
+      });
+    }
+
+    let result;
+    if (typeof clerkUserId === 'string' && clerkUserId.length > 0) {
+      result = await addDocumentMemberByClerkId({
+        ownerUserId: req.user.id,
+        documentId: id,
+        targetClerkUserId: clerkUserId,
+        role,
+      });
+    } else if (typeof userId === 'string' && userId.length > 0) {
+      result = await addDocumentMemberByUserId({
+        ownerUserId: req.user.id,
+        documentId: id,
+        targetUserId: userId,
+        role,
+      });
+    } else {
+      return res.status(400).json({
+        error: 'missing_target',
+        message: 'Choose someone from search to add them to this document.',
+      });
+    }
+
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode === 403) return res.status(403).json({ error: 'forbidden' });
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (e.statusCode === 400) {
+      return res.status(400).json({
+        error: e.code || 'bad_request',
+        message: e.message || 'Request failed',
+      });
+    }
+    console.error('[POST /api/documents/:id/members]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.patch('/api/documents/:id/members/:userId', requireClerkAuth, async (req, res) => {
+  const { id, userId: targetUserId } = req.params;
+  const { role } = req.body || {};
+  try {
+    await updateDocumentMemberRole({
+      ownerUserId: req.user.id,
+      documentId: id,
+      targetUserId,
+      role: role === 'viewer' ? 'viewer' : 'editor',
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.statusCode === 403) return res.status(403).json({ error: 'forbidden' });
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (e.statusCode === 400) {
+      return res.status(400).json({ error: e.message || 'bad_request' });
+    }
+    console.error('[PATCH /api/documents/:id/members/:userId]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.delete('/api/documents/:id/members/:userId', requireClerkAuth, async (req, res) => {
+  const { id, userId: targetUserId } = req.params;
+  try {
+    await removeDocumentMember({
+      ownerUserId: req.user.id,
+      documentId: id,
+      targetUserId,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.statusCode === 403) return res.status(403).json({ error: 'forbidden' });
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (e.statusCode === 400) {
+      return res.status(400).json({ error: e.message || 'bad_request' });
+    }
+    console.error('[DELETE /api/documents/:id/members/:userId]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/documents/:id/access-requests', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  const requestedRole = req.body?.requestedRole === 'viewer' ? 'viewer' : 'editor';
+  try {
+    const rl = await inviteMemberLimiter.check(String(req.user.id));
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: 'rate_limit',
+        message: 'Too many requests in a short time. Try again in a minute.',
+        resetAt: rl.resetAt,
+      });
+    }
+    const result = await createAccessRequest({
+      requesterUserId: req.user.id,
+      documentId: id,
+      requestedRole,
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (e.statusCode === 400) {
+      return res.status(400).json({
+        error: e.code || 'bad_request',
+        message: e.message || 'Request failed',
+      });
+    }
+    console.error('[POST /api/documents/:id/access-requests]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/documents/:id/access-requests/:requestId/resolve', requireClerkAuth, async (req, res) => {
+  const { id, requestId } = req.params;
+  const raw = req.body?.decision;
+  const decision = raw === 'approve' || raw === 'deny' ? raw : null;
+  if (!decision) {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'decision must be approve or deny',
+    });
+  }
+  try {
+    const result = await resolveAccessRequest({
+      ownerUserId: req.user.id,
+      documentId: id,
+      requestId,
+      decision,
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode === 403) return res.status(403).json({ error: 'forbidden' });
+    if (e.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (e.statusCode === 400) {
+      return res.status(400).json({
+        error: e.code || 'bad_request',
+        message: e.message || 'Request failed',
+      });
+    }
+    console.error('[POST /api/documents/:id/access-requests/:requestId/resolve]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.get('/api/notifications', requireClerkAuth, async (req, res) => {
+  try {
+    const rawLimit = req.query?.limit;
+    const limit =
+      typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : 50;
+    const notifications = await listNotificationsForUser(req.user.id, { limit });
+    const unreadCount = await countUnreadNotifications(req.user.id);
+    res.json({ notifications, unreadCount });
+  } catch (e) {
+    console.error('[GET /api/notifications]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ok = await markNotificationRead({ userId: req.user.id, notificationId: id });
+    if (!ok) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[PATCH /api/notifications/:id/read]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/notifications/mark-all-read', requireClerkAuth, async (req, res) => {
+  try {
+    await markAllNotificationsRead(req.user.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[POST /api/notifications/mark-all-read]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.delete('/api/notifications/:id', requireClerkAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ok = await deleteNotificationForUser({ userId: req.user.id, notificationId: id });
+    if (!ok) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[DELETE /api/notifications/:id]', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.delete('/api/notifications', requireClerkAuth, async (req, res) => {
+  try {
+    await deleteAllNotificationsForUser(req.user.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[DELETE /api/notifications]', e?.message || e);
     res.status(500).json({ error: 'server_error' });
   }
 });

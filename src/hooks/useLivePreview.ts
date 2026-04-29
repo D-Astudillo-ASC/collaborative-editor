@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import type { RefObject } from 'react';
 import type { PreviewState } from '@/types/execution';
 import type { Language } from '@/types';
 
@@ -11,7 +12,7 @@ interface UseLivePreviewReturn {
   preview: PreviewState;
   updatePreview: (code: string) => void;
   resetPreview: () => void;
-  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef: RefObject<HTMLIFrameElement | null>;
 }
 
 const DEFAULT_PREVIEW: PreviewState = {

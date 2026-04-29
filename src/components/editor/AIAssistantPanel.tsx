@@ -254,7 +254,7 @@ function AIAssistantPanel({ code, language, selection }, ref) {
       } else {
         // Synchronize external events into local state — same pattern as
         // ChatPanel; the functional updater form is referentially safe.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
+         
         setPendingNewCount((c) => c + 1);
       }
       return;

@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { DocumentGrid } from '@/components/dashboard/DocumentGrid';
 import { NewDocumentModal } from '@/components/dashboard/NewDocumentModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { PanelRight } from 'lucide-react';
@@ -50,6 +52,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const Dashboard = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isLoaded, isAuthenticated, getAccessToken } = useAuth();
   const [showSidebar, setShowSidebar] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -57,23 +60,14 @@ const Dashboard = () => {
   const [isNewDocModalOpen, setIsNewDocModalOpen] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | undefined>();
 
+  const noticeParam = searchParams.get('notice');
+  const docIdParam = searchParams.get('docId');
+
   // Template selection is handled by NewDocumentModal component
   // No local template state needed here
 
 
-  useEffect(() => {
-    // PREVIOUS IMPLEMENTATION (commented out):
-    // - Fetched documents once on mount, even if `token` was not yet available.
-    //
-    // Reason for change:
-    // - Clerk tokens are fetched/rotated asynchronously; we wait until we have a token before calling the backend.
-    // - Use `getAccessToken()` on demand to avoid sending an expired JWT (which caused 403s).
-    if (isLoaded && isAuthenticated) {
-      fetchDocuments();
-    }
-  }, [isLoaded, isAuthenticated]);
-
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -97,7 +91,88 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getAccessToken]);
+
+
+  useEffect(() => {
+    // PREVIOUS IMPLEMENTATION (commented out):
+    // - Fetched documents once on mount, even if `token` was not yet available.
+    //
+    // Reason for change:
+    // - Clerk tokens are fetched/rotated asynchronously; we wait until we have a token before calling the backend.
+    // - Use `getAccessToken()` on demand to avoid sending an expired JWT (which caused 403s).
+    if (isLoaded && isAuthenticated) {
+      void fetchDocuments();
+    }
+  }, [isLoaded, isAuthenticated, fetchDocuments]);
+
+  useEffect(() => {
+    if (!isLoaded || !isAuthenticated) return;
+    if (noticeParam !== 'no_document_access') return;
+
+    const docId = docIdParam;
+
+    const requestAccess = async (id: string) => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const res = await fetch(apiUrl(`/api/documents/${id}/access-requests`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ requestedRole: 'editor' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = typeof data.message === 'string' ? data.message : 'Could not send request.';
+          toast.error(msg);
+          return;
+        }
+        if (data.status === 'already_pending') {
+          toast.message('Request already pending', {
+            description: 'The owner has not responded yet.',
+          });
+          return;
+        }
+        toast.success('Access request sent', {
+          description: 'The document owner can approve it from Share.',
+        });
+      } catch {
+        toast.error('Could not send access request.');
+      }
+    };
+
+    toast.error('You don’t have access to this document', {
+      id: 'document-access-denied',
+      description: docId
+        ? 'You can ask the owner for access. They’ll see the request under Share.'
+        : 'The owner has not shared it with this account.',
+      ...(docId
+        ? {
+            action: {
+              label: 'Request access',
+              onClick: () => void requestAccess(docId),
+            },
+          }
+        : {}),
+      duration: 14_000,
+    });
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('notice');
+    next.delete('docId');
+    setSearchParams(next, { replace: true });
+  }, [
+    isLoaded,
+    isAuthenticated,
+    noticeParam,
+    docIdParam,
+    searchParams,
+    setSearchParams,
+    getAccessToken,
+  ]);
 
   // TODO: Template helper function - commented out since NewDocumentModal handles template selection
   // Uncomment if template-to-language mapping is needed here in the future
@@ -213,8 +288,9 @@ const Dashboard = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="fixed right-4 top-4 z-50"
+          className="fixed right-4 top-4 z-50 flex items-center gap-1"
         >
+          <NotificationBell className="h-10 w-10 rounded-full shadow-lg bg-card hover:bg-accent border border-border" />
           <ThemeToggle className="h-10 w-10 rounded-full shadow-lg bg-card hover:bg-accent border border-border" />
         </motion.div>
         {/* Document Grid - displays documents with new theme styling */}

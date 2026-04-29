@@ -162,3 +162,24 @@ export const executionLimiter = new RateLimiter({
   max: 10,
   failClosed: true, // resource-intensive; deny if Redis is down
 });
+
+/**
+ * Adding document members (directory / user id). Per owner (DB user id).
+ * Prevents spray to arbitrary addresses. Fail-open if Redis is down (portfolio).
+ */
+export const inviteMemberLimiter = new RateLimiter({
+  namespace: 'rate_limit:doc_invite',
+  windowMs: 60_000,
+  max: 25,
+  failClosed: false,
+});
+
+/**
+ * Clerk / DB people search for share dialog. Per requester (DB user id).
+ */
+export const userSearchLimiter = new RateLimiter({
+  namespace: 'rate_limit:user_search',
+  windowMs: 60_000,
+  max: 45,
+  failClosed: false,
+});

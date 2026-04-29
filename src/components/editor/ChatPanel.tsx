@@ -1108,7 +1108,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
       // up — this is a textbook case of "synchronize external events into local
       // state" that the lint rule mis-flags as a cascading render. The functional
       // updater form keeps the update referentially safe.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+       
       setPendingNewCount((c) => c + 1);
     }
   }, [messages, isAtBottom, currentUser?.id]);

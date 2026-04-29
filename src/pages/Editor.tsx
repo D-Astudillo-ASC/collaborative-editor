@@ -26,6 +26,7 @@ import { templates } from '@/constants/templates';
 import { languages } from '@/constants/languages';
 import { apiUrl } from '@/config/backend';
 import { UnifiedOutputPanel } from '@/components/editor/UnifiedOutputPanel';
+import { DocumentShareDialog } from '@/components/editor/DocumentShareDialog';
 import type { Language, Template } from '@/types';
 import type { TemplateCategory } from '@/types/execution';
 
@@ -62,6 +63,7 @@ export default function Editor() {
   const [isTemplatePickerOpen, setIsTemplatePickerOpen] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<'chat' | 'ai'>('ai');
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
   // Chat is "visible" only when the right panel is open AND its tab is Chat.
   // This drives unread tracking (incoming messages while hidden bump the badge).
@@ -119,6 +121,7 @@ export default function Editor() {
   });
 
   const canEditDocument = documentRole !== 'viewer';
+  const isDocumentOwner = documentRole === 'owner';
 
   const documentRoleRef = useRef(documentRole);
   useEffect(() => {
@@ -356,51 +359,9 @@ export default function Editor() {
     }
   }, [yText, executionMode, updatePreview, canEditDocument, patchDocument]);
 
-  const handleShare = useCallback(async () => {
-    if (!documentId) return;
-
-    try {
-      const token = await getAccessToken();
-      if (!token) {
-        // Without a signed-in user, just copy the current URL
-        const url = `${window.location.origin}/editor/${documentId}${linkToken ? `?token=${linkToken}` : ''}`;
-        await navigator.clipboard.writeText(url);
-        toast.success('Link copied to clipboard!');
-        return;
-      }
-
-      // Generate/rotate share link token on the server
-      const res = await fetch(apiUrl(`/api/documents/${documentId}/share-link`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ mode: 'edit' }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`share-link failed: ${res.status}`);
-      }
-
-      const data = await res.json();
-      const shareUrl = `${window.location.origin}/editor/${documentId}?token=${data.token}`;
-
-      if (navigator.share) {
-        await navigator.share({ title: 'Collaborative Document', url: shareUrl });
-        toast.success('Share link generated!');
-      } else {
-        await navigator.clipboard.writeText(shareUrl);
-        toast.success('Share link copied to clipboard!');
-      }
-    } catch (error) {
-      console.error('Failed to generate share link:', error);
-      // Fallback: at least copy the current URL
-      const url = `${window.location.origin}/editor/${documentId}${linkToken ? `?token=${linkToken}` : ''}`;
-      await navigator.clipboard.writeText(url);
-      toast.success('Link copied to clipboard!');
-    }
-  }, [documentId, linkToken, getAccessToken]);
+  const handleShare = useCallback(() => {
+    setIsShareOpen(true);
+  }, []);
 
   const handleRun = useCallback(async () => {
     // Open output panel when running
@@ -488,6 +449,13 @@ export default function Editor() {
 
   return (
     <AppLayout topBar={topBar} showSidebar={false}>
+      <DocumentShareDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        documentId={documentId || null}
+        linkToken={linkToken}
+        canManageMembers={isDocumentOwner}
+      />
 
       <div className="relative flex h-full flex-col">
         <ResizablePanelGroup

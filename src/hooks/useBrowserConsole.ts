@@ -79,7 +79,7 @@ export function useBrowserConsole(): UseBrowserConsoleReturn {
         clear: () => {},
         dir: createLogger('log'),
         table: createLogger('log'),
-      } as Console;
+      } as unknown as typeof console;
 
       // Add timing function
       (iframeWindow as unknown as Record<string, unknown>).sleep = (ms: number) => 

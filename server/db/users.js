@@ -29,7 +29,8 @@ async function upsertUserByClerkId({ clerkUserId, email, name, avatarUrl }) {
     `,
     [clerkUserId, email, name, avatarUrl]
   );
-  return res.rows[0];
+  const row = res.rows[0];
+  return row;
 }
 
 export { upsertUserByClerkId };

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getPool } from './pool.js';
+import { listPendingAccessRequestsForDocument } from './access-requests.js';
 
 const ALLOWED_EDITOR_LANGUAGES = new Set([
   'javascript',
@@ -226,6 +227,107 @@ async function rotateShareLink({ userId, documentId, mode }) {
   return { token, shareStatus };
 }
 
+function forbiddenError() {
+  const err = new Error('forbidden');
+  err.statusCode = 403;
+  return err;
+}
+
+async function assertDocumentOwner({ userId, documentId }) {
+  const pool = getPool();
+  const doc = await pool.query(
+    `select owner_user_id from documents where id = $1 and archived_at is null`,
+    [documentId]
+  );
+  if (!doc.rows.length) {
+    const err = new Error('not_found');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (doc.rows[0].owner_user_id !== userId) {
+    throw forbiddenError();
+  }
+}
+
+async function listDocumentMembersAndInvites({ userId, documentId }) {
+  await assertDocumentOwner({ userId, documentId });
+  const pool = getPool();
+
+  const members = await pool.query(
+    `
+      select
+        u.id as "userId",
+        m.role,
+        u.email,
+        u.name,
+        u.avatar_url as "avatarUrl"
+      from document_members m
+      join users u on u.id = m.user_id
+      where m.document_id = $1
+      order by case m.role when 'owner' then 0 else 1 end, u.email nulls last, u.name nulls last;
+    `,
+    [documentId]
+  );
+
+  const pendingAccessRequests = await listPendingAccessRequestsForDocument(documentId);
+
+  return { members: members.rows, pendingInvites: [], pendingAccessRequests };
+}
+
+async function updateDocumentMemberRole({ ownerUserId, documentId, targetUserId, role }) {
+  if (role !== 'editor' && role !== 'viewer') {
+    const err = new Error('invalid_role');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await assertDocumentOwner({ userId: ownerUserId, documentId });
+  const pool = getPool();
+
+  const doc = await pool.query(`select owner_user_id from documents where id = $1`, [documentId]);
+  if (doc.rows[0]?.owner_user_id === targetUserId) {
+    const err = new Error('cannot_change_owner_role');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const res = await pool.query(
+    `
+      update document_members
+      set role = $3, updated_at = now()
+      where document_id = $1 and user_id = $2 and role <> 'owner';
+    `,
+    [documentId, targetUserId, role]
+  );
+  if (res.rowCount === 0) {
+    const err = new Error('not_found');
+    err.statusCode = 404;
+    throw err;
+  }
+}
+
+async function removeDocumentMember({ ownerUserId, documentId, targetUserId }) {
+  await assertDocumentOwner({ userId: ownerUserId, documentId });
+  const pool = getPool();
+
+  const doc = await pool.query(`select owner_user_id from documents where id = $1`, [documentId]);
+  if (doc.rows[0]?.owner_user_id === targetUserId) {
+    const err = new Error('cannot_remove_owner');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const res = await pool.query(
+    `delete from document_members where document_id = $1 and user_id = $2`,
+    [documentId, targetUserId]
+  );
+  if (res.rowCount === 0) {
+    const err = new Error('not_found');
+    err.statusCode = 404;
+    throw err;
+  }
+}
+
 export {
   listDocumentsForUser,
   createDocumentForUser,
@@ -234,5 +336,8 @@ export {
   rotateShareLink,
   getDocumentMetaForAccess,
   updateDocumentMeta,
+  listDocumentMembersAndInvites,
+  updateDocumentMemberRole,
+  removeDocumentMember,
 };
 

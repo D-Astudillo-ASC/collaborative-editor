@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import {
+  Bell,
   FileCode,
   FolderOpen,
   Settings,
@@ -9,9 +10,11 @@ import {
   LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
+import { useNotificationInbox } from '@/hooks/useNotificationInbox';
 import { useClerk } from '@clerk/clerk-react';
 // import type { DocumentCard as DocumentCardType } from '@/types';
 import type { Document } from '@/types';
@@ -35,6 +38,7 @@ export function Sidebar({
   const navigate = useNavigate();
   const { user } = useAuth();
   const { signOut } = useClerk();
+  const { unreadCount } = useNotificationInbox();
 
   const handleSignOut = async () => {
     await signOut();
@@ -136,6 +140,39 @@ export function Sidebar({
 
       {/* Footer */}
       <div className="border-t border-sidebar-border p-2 space-y-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/notifications')}
+              className={cn(
+                "w-full justify-start gap-2",
+                "text-sidebar-foreground hover:bg-sidebar-accent",
+                isCollapsed && "justify-center px-2"
+              )}
+            >
+              <span className="relative inline-flex">
+                <Bell className="h-4 w-4" />
+                {isCollapsed && unreadCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-destructive" />
+                ) : null}
+              </span>
+              {!isCollapsed && <span className="flex-1 text-left">Messages</span>}
+              {!isCollapsed && unreadCount > 0 ? (
+                <Badge
+                  variant="destructive"
+                  className="h-5 min-w-5 shrink-0 px-1.5 text-[10px] tabular-nums"
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Badge>
+              ) : null}
+            </Button>
+          </TooltipTrigger>
+          {isCollapsed ? (
+            <TooltipContent side="right">Messages{unreadCount > 0 ? ` (${unreadCount})` : ''}</TooltipContent>
+          ) : null}
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

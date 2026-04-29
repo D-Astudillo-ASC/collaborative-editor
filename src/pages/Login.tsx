@@ -174,7 +174,7 @@ const Login = () => {
               <div className="pl-4">dev.<span className="text-success">collaborate</span>();</div>
               <div>{'}'});</div>
               <div className="h-4" />
-              <div className="text-success">// Ship faster, together 🚀</div>
+              <div className="text-success">{'// Ship faster, together 🚀'}</div>
             </div>
           </div>
         </motion.div>

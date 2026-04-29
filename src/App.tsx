@@ -1,24 +1,27 @@
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { ClerkProvider } from '@clerk/clerk-react';
+import React, { Suspense, lazy } from "react";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { ClerkProvider } from "@clerk/clerk-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { ThemeProvider } from '@/contexts/ThemeContext';
-import { AuthProvider } from '@/contexts/AuthContext';
-import Login from '@/pages/Login';
-import Signup from '@/pages/Signup';
-import Landing from '@/pages/Landing';
-import Settings from '@/pages/Settings';
-import Profile from '@/pages/Profile';
-import NotFound from '@/pages/NotFound';
-import Dashboard from '@/pages/Dashboard';
-import PrivateRoute from '@/components/PrivateRoute';
-import { Box, CircularProgress } from '@mui/material';
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { AuthProvider } from "@/contexts/AuthContext";
+import Login from "@/pages/Login";
+import Signup from "@/pages/Signup";
+import Landing from "@/pages/Landing";
+import Settings from "@/pages/Settings";
+import Profile from "@/pages/Profile";
+import NotFound from "@/pages/NotFound";
+import Dashboard from "@/pages/Dashboard";
+import Notifications from "@/pages/Notifications";
+import PrivateRoute from "@/components/PrivateRoute";
+import { Box, CircularProgress } from "@mui/material";
 
-const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as
+  | string
+  | undefined;
 if (!publishableKey) {
-  throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY');
+  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
 }
 
 // ClerkProvider wrapper that integrates with React Router
@@ -48,7 +51,7 @@ const queryClient = new QueryClient({
 
 // Lazy route component (splits Monaco-heavy editor into a separate chunk).
 // const CodeEditor = lazy(() => import('@/components/CodeEditor'));
-const CodeEditor = lazy(() => import('@/pages/Editor'));
+const CodeEditor = lazy(() => import("@/pages/Editor"));
 
 function AppContent() {
   return (
@@ -73,6 +76,14 @@ function AppContent() {
                   </PrivateRoute>
                 }
               />
+              <Route
+                path="/notifications"
+                element={
+                  <PrivateRoute>
+                    <Notifications />
+                  </PrivateRoute>
+                }
+              />
               <Route path="/login/*" element={<Login />} />
               <Route path="/" element={<Landing />} />
               <Route path="/signup/*" element={<Signup />} />
@@ -89,10 +100,10 @@ function AppContent() {
                       fallback={
                         <Box
                           sx={{
-                            minHeight: '100vh',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
+                            minHeight: "100vh",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
                           }}
                         >
                           <CircularProgress />
